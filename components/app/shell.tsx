@@ -1,0 +1,128 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useStore } from "@/lib/store";
+import { useRoute, useUI } from "@/lib/ui";
+import { ServerRail } from "./rail";
+import { HomeSidebar, ServerSidebar } from "./sidebars";
+import { UserBar, VoiceBar } from "./user-bar";
+import { ChatView } from "./chat";
+import { FriendsView } from "./friends";
+import { VoiceView } from "./voice-view";
+import { HallView } from "./hall";
+import { ShowsView } from "./shows";
+import { MemberList } from "./members";
+import { ProfilePopover } from "./profile";
+import { Modals } from "./modals";
+
+export function Shell() {
+  const route = useRoute();
+  const router = useRouter();
+  const servers = useStore((s) => s.servers);
+  const dms = useStore((s) => s.dms);
+  const connected = useStore((s) => s.connected);
+  const navOpen = useUI((s) => s.navOpen);
+  const showMembers = useUI((s) => s.showMembers);
+  const toastMsg = useUI((s) => s.toast);
+
+  const server = route.kind === "server" ? servers[route.serverId] : undefined;
+  const channel = server && route.kind === "server" ? server.channels.find((c) => c.id === route.channelId) : undefined;
+  const dm = route.kind === "dm" ? dms.find((d) => d.id === route.id) : undefined;
+  const page = route.kind === "server" ? route.page : undefined;
+
+  // servidor sem canal na rota: abre o primeiro canal de texto (ou o último visitado)
+  useEffect(() => {
+    if (route.kind !== "server") return;
+    if (!server) {
+      if (Object.keys(servers).length || route.serverId) router.replace("/app");
+      return;
+    }
+    if (!channel && !route.page) {
+      let last: string | null = null;
+      try {
+        last = localStorage.getItem(`cdg:last:${server.id}`);
+      } catch {
+        /* sem armazenamento */
+      }
+      const target = server.channels.find((c) => c.id === last) ?? server.channels.find((c) => c.type === "text") ?? server.channels[0];
+      if (target) router.replace(`/app/s/${server.id}/${target.id}`);
+    } else if (channel) {
+      try {
+        localStorage.setItem(`cdg:last:${server.id}`, channel.id);
+      } catch {
+        /* sem armazenamento */
+      }
+    }
+  }, [route, server, channel, servers, router]);
+
+  useEffect(() => {
+    if (route.kind === "dm" && !dm && dms.length >= 0) {
+      const t = window.setTimeout(() => {
+        if (!useStore.getState().dms.some((d) => d.id === route.id)) router.replace("/app");
+      }, 1500);
+      return () => window.clearTimeout(t);
+    }
+  }, [route, dm, dms.length, router]);
+
+  // fecha a gaveta (celular) ao navegar
+  useEffect(() => {
+    useUI.setState({ navOpen: false });
+  }, [route.kind, route.kind === "server" ? (route.channelId ?? route.page) : route.kind === "dm" ? route.id : ""]);
+
+  // título da aba
+  useEffect(() => {
+    document.title = channel
+      ? `${channel.type === "text" ? "#" : ""}${channel.name} · ${server?.name}`
+      : page && server
+        ? `${page === "hall" ? "Hall da Fama" : "Onde paramos"} · ${server.name}`
+      : dm
+        ? `${dm.recipients.map((u) => u.display_name).join(", ")} · Call dos Games`
+        : "Call dos Games";
+  }, [channel, server?.name, dm, page]);
+
+  let main: React.ReactNode = <FriendsView />;
+  if (route.kind === "dm" && dm) main = <ChatView channelId={dm.id} dm={dm} />;
+  if (channel?.type === "text") main = <ChatView channelId={channel.id} server={server} channel={channel} />;
+  if (channel?.type === "voice" && server) main = <VoiceView channel={channel} server={server} />;
+  if (route.kind === "server" && !channel) main = <div className="flex-1 bg-cocoa-3" />;
+  if (server && page === "hall") main = <HallView server={server} />;
+  if (server && page === "lista") main = <ShowsView server={server} />;
+
+  const members = server && channel?.type === "text" && showMembers;
+
+  return (
+    <div className="flex h-svh overflow-hidden bg-cocoa-1">
+      {/* navegação: fixa no desktop, gaveta no celular */}
+      <div
+        className={`fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:translate-x-0 ${navOpen ? "translate-x-0" : "-translate-x-full"}`}
+      >
+        <ServerRail />
+        <div className="flex w-[248px] flex-col bg-cocoa-2">
+          {server ? <ServerSidebar server={server} activeId={channel?.id ?? null} page={page} /> : <HomeSidebar activeDm={dm?.id ?? null} />}
+          <VoiceBar />
+          <UserBar />
+        </div>
+      </div>
+      {navOpen && <div className="fixed inset-0 z-30 bg-cocoa-0/60 md:hidden" onClick={() => useUI.setState({ navOpen: false })} />}
+
+      <main className="flex min-w-0 flex-1 flex-col bg-cocoa-3">
+        {!connected && (
+          <div className="bg-honey/90 px-4 py-1.5 text-center text-[12.5px] font-semibold text-cocoa-0">Reconectando ao servidor da turma…</div>
+        )}
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">{main}</div>
+          {members && <MemberList server={server!} />}
+        </div>
+      </main>
+
+      <ProfilePopover />
+      <Modals />
+      {toastMsg && (
+        <div key={toastMsg.id} role="status" className="slide-in fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">
+          {toastMsg.text}
+        </div>
+      )}
+    </div>
+  );
+}

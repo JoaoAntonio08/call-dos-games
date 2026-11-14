@@ -1,0 +1,14 @@
+# /etc/systemd/system/livekit.service — só para a opção B
+[Unit]
+Description=LiveKit (voz e vídeo do Call dos Games)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/livekit-server --config /etc/livekit.yaml
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

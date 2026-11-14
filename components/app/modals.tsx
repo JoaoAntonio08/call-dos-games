@@ -1,0 +1,1007 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Copy, Hash, ImagePlus, LogOut, Play, Trash2, Upload, Volume2 } from "lucide-react";
+import { api, errorText, upload } from "@/lib/api";
+import { logout, useStore } from "@/lib/store";
+import { closeModal, toast, useUI } from "@/lib/ui";
+import { useVoice, type VoicePrefs } from "@/lib/voice";
+import type { Me, Server } from "@/lib/types";
+import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
+import { keyName } from "./user-bar";
+import { Room } from "livekit-client";
+
+export function Modals() {
+  const modal = useUI((s) => s.modal);
+  const servers = useStore((s) => s.servers);
+  if (!modal) return null;
+  switch (modal.kind) {
+    case "create-server":
+      return <CreateServer />;
+    case "invite":
+      return servers[modal.serverId] ? <Invite server={servers[modal.serverId]} /> : null;
+    case "create-channel":
+      return servers[modal.serverId] ? <CreateChannel server={servers[modal.serverId]} type={modal.type} /> : null;
+    case "settings":
+      return <UserSettings tab={modal.tab} />;
+    case "server-settings":
+      return servers[modal.serverId] ? <ServerSettings server={servers[modal.serverId]} tab={modal.tab} /> : null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* criar ou entrar num servidor                                        */
+/* ------------------------------------------------------------------ */
+
+function CreateServer() {
+  const router = useRouter();
+  const me = useStore((s) => s.me)!;
+  const [mode, setMode] = useState<"create" | "join">("create");
+  const [name, setName] = useState(`Casa de ${me.display_name}`);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      let s: Server;
+      if (mode === "create") s = await api<Server>("/servers", { json: { name } });
+      else {
+        const c = code.trim().replace(/.*\/convite\//, "").replace(/[^a-z0-9]/gi, "");
+        s = await api<Server>(`/invites/${c}/join`, { method: "POST" });
+      }
+      useStore.setState((st) => ({ servers: { ...st.servers, [s.id]: s }, serverOrder: st.serverOrder.includes(s.id) ? st.serverOrder : [...st.serverOrder, s.id] }));
+      closeModal();
+      router.push(`/app/s/${s.id}`);
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={closeModal} label="Criar servidor" className="w-[min(460px,100%)]">
+      <form onSubmit={submit} className="p-6">
+        <div className="flex items-start justify-between">
+          <h2 className="font-display text-[30px] leading-tight">{mode === "create" ? "Um cantinho novo" : "Entrar com convite"}</h2>
+          <CloseButton onClick={closeModal} />
+        </div>
+        <p className="mt-1 text-[14px] text-oat/55">
+          {mode === "create" ? "Servidor é a casa da turma: canais de texto, de voz, soundboard e emojis só de vocês." : "Cole o link ou o código que mandaram para você."}
+        </p>
+        <div className="mt-5">
+          {mode === "create" ? (
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-semibold text-oat/70">Nome do servidor</span>
+              <input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={48} autoFocus required />
+            </label>
+          ) : (
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-semibold text-oat/70">Convite</span>
+              <input className="field" value={code} onChange={(e) => setCode(e.target.value)} placeholder="https://…/convite/abcd2345 ou abcd2345" autoFocus required />
+            </label>
+          )}
+        </div>
+        <FormError>{error}</FormError>
+        <button type="submit" disabled={busy} className="btn-ember mt-5 h-11 w-full text-[15px]">
+          {busy ? "Só um instante…" : mode === "create" ? "Criar servidor" : "Entrar"}
+        </button>
+        <button type="button" onClick={() => (setMode(mode === "create" ? "join" : "create"), setError(""))} className="link-u mx-auto mt-4 block text-[13.5px] text-oat/55 hover:text-oat">
+          {mode === "create" ? "Recebeu um convite? Entrar num servidor" : "Prefiro criar o meu"}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* convite                                                             */
+/* ------------------------------------------------------------------ */
+
+function Invite({ server }: { server: Server }) {
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [expires, setExpires] = useState<number | null>(168);
+
+  useEffect(() => {
+    setCode(null);
+    api<{ code: string }>(`/servers/${server.id}/invites`, { json: { expires_hours: expires } })
+      .then((r) => setCode(r.code))
+      .catch((e) => setError(errorText(e)));
+  }, [server.id, expires]);
+
+  const link = code ? `${location.origin}/convite/${code}` : "";
+
+  return (
+    <Modal open onClose={closeModal} label="Convidar" className="w-[min(480px,100%)]">
+      <div className="p-6">
+        <div className="flex items-start justify-between">
+          <h2 className="font-display text-[28px] leading-tight">
+            Chama a turma pra <span className="italic">{server.name}</span>
+          </h2>
+          <CloseButton onClick={closeModal} />
+        </div>
+        <p className="mt-1 text-[14px] text-oat/55">Manda esse link no grupo. Quem abrir cria a conta (ou entra) e já cai aqui dentro.</p>
+        <div className="mt-5 flex gap-2">
+          <input readOnly value={link || "Gerando convite…"} className="field h-11 flex-1 text-[14px]" onFocus={(e) => e.target.select()} />
+          <button
+            type="button"
+            disabled={!code}
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(link);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1800);
+              } catch {
+                toast("Não deu para copiar. Selecione o link e copie na mão.");
+              }
+            }}
+            className={`press flex h-11 w-[110px] items-center justify-center gap-2 rounded-[12px] text-[14px] font-semibold ${copied ? "bg-moss text-white" : "btn-ember"}`}
+          >
+            <Copy className="size-4" /> {copied ? "Copiado" : "Copiar"}
+          </button>
+        </div>
+        <FormError>{error}</FormError>
+        <div className="mt-4 flex items-center gap-2 text-[13px] text-oat/55">
+          Vale por
+          <select value={String(expires)} onChange={(e) => setExpires(e.target.value === "null" ? null : Number(e.target.value))} className="rounded-[8px] bg-cocoa-0 px-2 py-1 text-oat outline-none">
+            <option value="24">1 dia</option>
+            <option value="168">7 dias</option>
+            <option value="null">para sempre</option>
+          </select>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* criar canal                                                         */
+/* ------------------------------------------------------------------ */
+
+function CreateChannel({ server, type: initial }: { server: Server; type: "text" | "voice" }) {
+  const router = useRouter();
+  const [type, setType] = useState(initial);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <Modal open onClose={closeModal} label="Criar canal" className="w-[min(440px,100%)]">
+      <form
+        className="p-6"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          try {
+            const c = await api<{ id: string }>(`/servers/${server.id}/channels`, { json: { name, type } });
+            closeModal();
+            router.push(`/app/s/${server.id}/${c.id}`);
+          } catch (err) {
+            setError(errorText(err));
+            setBusy(false);
+          }
+        }}
+      >
+        <div className="flex items-start justify-between">
+          <h2 className="font-display text-[28px]">Canal novo</h2>
+          <CloseButton onClick={closeModal} />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {(["text", "voice"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setType(t)}
+              className={`press flex items-center gap-2.5 rounded-[12px] border-2 p-3 text-left ${type === t ? "border-ember bg-ember/10" : "border-transparent bg-cocoa-3 hover:bg-cocoa-4"}`}
+            >
+              {t === "text" ? <Hash className="size-5 text-oat/60" /> : <Volume2 className="size-5 text-oat/60" />}
+              <span>
+                <span className="block text-[14.5px] font-semibold">{t === "text" ? "Texto" : "Voz"}</span>
+                <span className="block text-[12px] text-oat/50">{t === "text" ? "mensagens, prints, memes" : "call, tela e atividades"}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <label className="mt-4 block">
+          <span className="mb-1.5 block text-[13px] font-semibold text-oat/70">Nome</span>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "text" ? "fofoca" : "Cinema"} maxLength={40} autoFocus required />
+        </label>
+        <FormError>{error}</FormError>
+        <button type="submit" disabled={busy || !name.trim()} className="btn-ember mt-5 h-11 w-full text-[15px]">
+          Criar canal
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* moldura das configurações (abas à esquerda)                         */
+/* ------------------------------------------------------------------ */
+
+function SettingsFrame({
+  title,
+  tabs,
+  tab,
+  setTab,
+  children,
+  footer,
+}: {
+  title: string;
+  tabs: [string, string][];
+  tab: string;
+  setTab: (t: string) => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <Modal open onClose={closeModal} label={title} className="flex h-[min(720px,calc(100svh-24px))] w-[min(940px,100%)] flex-col overflow-hidden sm:flex-row">
+      <nav className="flex shrink-0 gap-1 overflow-x-auto bg-cocoa-1 p-3 sm:w-[210px] sm:flex-col sm:p-4">
+        <p className="label hidden px-2 pb-2 text-oat/40 sm:block">{title}</p>
+        {tabs.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={`press shrink-0 rounded-[9px] px-2.5 py-1.5 text-left text-[14.5px] font-medium ${tab === id ? "bg-cocoa-4 text-oat" : "text-oat/60 hover:bg-cocoa-3 hover:text-oat"}`}
+          >
+            {label}
+          </button>
+        ))}
+        {footer && <div className="mt-auto hidden sm:block">{footer}</div>}
+      </nav>
+      <div className="relative min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-8">
+        <CloseButton onClick={closeModal} className="absolute right-4 top-4" />
+        {children}
+      </div>
+    </Modal>
+  );
+}
+
+function H({ children }: { children: React.ReactNode }) {
+  return <h2 className="mb-6 pr-10 font-display text-[30px] leading-tight">{children}</h2>;
+}
+
+/** Botão que abre o seletor de arquivo. */
+function FileButton({ accept, onFile, children, className = "btn-quiet h-9 px-3.5 text-[13.5px]" }: { accept: string; onFile: (f: File) => void; children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button type="button" onClick={() => ref.current?.click()} className={`flex items-center gap-2 ${className}`}>
+        {children}
+      </button>
+      <input
+        ref={ref}
+        type="file"
+        accept={accept}
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
+      />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* configurações da pessoa                                             */
+/* ------------------------------------------------------------------ */
+
+const ACCENTS = ["#5865f2", "#f23f43", "#f0b232", "#23a55a", "#1abc9c", "#00a8fc", "#9b59b6", "#eb459e", "#f2f3f5"];
+
+function UserSettings({ tab: initial }: { tab?: string }) {
+  const [tab, setTab] = useState(initial ?? "perfil");
+  return (
+    <SettingsFrame
+      title="Suas configurações"
+      tab={tab}
+      setTab={setTab}
+      tabs={[
+        ["perfil", "Perfil"],
+        ["voz", "Voz e vídeo"],
+        ["conta", "Conta"],
+      ]}
+      footer={
+        <button
+          type="button"
+          onClick={() => {
+            closeModal();
+            void logout();
+          }}
+          className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-1.5 text-[14px] text-[#ff8f92] hover:bg-rust hover:text-oat"
+        >
+          <LogOut className="size-4" /> Sair da conta
+        </button>
+      }
+    >
+      {tab === "perfil" && <ProfileTab />}
+      {tab === "voz" && <VoiceTab />}
+      {tab === "conta" && <AccountTab />}
+    </SettingsFrame>
+  );
+}
+
+function useSaveMe() {
+  return async (patch: Record<string, unknown>) => {
+    try {
+      const me = await api<Me>("/me", { method: "PATCH", json: patch });
+      useStore.setState({ me });
+      return true;
+    } catch (e) {
+      toast(errorText(e));
+      return false;
+    }
+  };
+}
+
+function ProfileTab() {
+  const me = useStore((s) => s.me)!;
+  const save = useSaveMe();
+  const [f, setF] = useState({ display_name: me.display_name, pronouns: me.pronouns, bio: me.bio, custom_status: me.custom_status });
+  const [busy, setBusy] = useState<string | null>(null);
+  const dirty = f.display_name !== me.display_name || f.pronouns !== me.pronouns || f.bio !== me.bio || f.custom_status !== me.custom_status;
+
+  async function media(kind: "avatar" | "banner" | "join-sound", file: File | null) {
+    setBusy(kind);
+    try {
+      const out = file ? await upload<Me>(`/me/${kind}`, file) : await api<Me>(`/me/${kind}`, { method: "DELETE" });
+      useStore.setState({ me: out });
+    } catch (e) {
+      toast(errorText(e));
+    }
+    setBusy(null);
+  }
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
+      <div>
+        <H>Seu perfil</H>
+        <Section title="Foto e banner" hint="PNG, JPG, GIF ou WebP. GIF e WebP animados ficam animados: parados na lista, mexendo quando passam o mouse ou abrem seu perfil. Foto até 10 MB, banner até 15 MB.">
+          <div className="flex flex-wrap gap-2">
+            <FileButton accept="image/png,image/jpeg,image/gif,image/webp" onFile={(f) => void media("avatar", f)} className="btn-ember h-9 px-3.5 text-[13.5px]">
+              <ImagePlus className="size-4" /> {busy === "avatar" ? "Enviando…" : "Trocar foto"}
+            </FileButton>
+            {me.avatar && (
+              <button type="button" onClick={() => void media("avatar", null)} className="btn-quiet h-9 px-3.5 text-[13.5px]">
+                Tirar foto
+              </button>
+            )}
+            <FileButton accept="image/png,image/jpeg,image/gif,image/webp" onFile={(f) => void media("banner", f)}>
+              <ImagePlus className="size-4" /> {busy === "banner" ? "Enviando…" : "Trocar banner"}
+            </FileButton>
+            {me.banner && (
+              <button type="button" onClick={() => void media("banner", null)} className="btn-quiet h-9 px-3.5 text-[13.5px]">
+                Tirar banner
+              </button>
+            )}
+          </div>
+        </Section>
+        <Section title="Nome">
+          <input className="field" value={f.display_name} maxLength={32} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
+        </Section>
+        <Section title="Pronomes">
+          <input className="field" value={f.pronouns} maxLength={24} placeholder="ele/dele, ela/dela…" onChange={(e) => setF({ ...f, pronouns: e.target.value })} />
+        </Section>
+        <Section title="Frase de status" hint="Aparece embaixo do seu nome. Ex.: “farmando runas”, “vendo Frieren”.">
+          <input className="field" value={f.custom_status} maxLength={80} onChange={(e) => setF({ ...f, custom_status: e.target.value })} />
+        </Section>
+        <Section title="Sobre mim">
+          <textarea className="field min-h-[96px] resize-y" value={f.bio} maxLength={300} onChange={(e) => setF({ ...f, bio: e.target.value })} />
+          <p className="mt-1 text-right text-[11.5px] text-oat/35">{f.bio.length}/300</p>
+        </Section>
+        <Section title="Cor do perfil">
+          <div className="flex flex-wrap gap-2">
+            {ACCENTS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                aria-label={`Cor ${c}`}
+                onClick={() => void save({ accent: c })}
+                className="press size-9 rounded-full"
+                style={{ background: c, boxShadow: me.accent === c ? "0 0 0 2px var(--color-cocoa-2), 0 0 0 4px var(--color-oat)" : undefined }}
+              />
+            ))}
+            <label className="press relative grid size-9 cursor-pointer place-items-center overflow-hidden rounded-full border-2 border-dashed border-oat/25 text-[11px] text-oat/50" title="Outra cor">
+              +
+              <input type="color" value={me.accent} onChange={(e) => void save({ accent: e.target.value })} className="absolute inset-0 cursor-pointer opacity-0" />
+            </label>
+          </div>
+        </Section>
+        <Section title="Som de entrada" hint="Toca para a turma quando você entra numa call. MP3, OGG, WAV ou M4A, até 2 MB (fica melhor com 1 a 3 segundos).">
+          <div className="flex flex-wrap items-center gap-2">
+            <FileButton accept="audio/*,.mp3,.ogg,.wav,.m4a,.webm" onFile={(f) => void media("join-sound", f)}>
+              <Upload className="size-4" /> {busy === "join-sound" ? "Enviando…" : me.join_sound ? "Trocar som" : "Escolher som"}
+            </FileButton>
+            {me.join_sound && (
+              <>
+                <button type="button" onClick={() => void new Audio(me.join_sound!).play()} className="btn-quiet flex h-9 items-center gap-2 px-3.5 text-[13.5px]">
+                  <Play className="size-4" /> Ouvir
+                </button>
+                <button type="button" onClick={() => void media("join-sound", null)} className="btn-quiet h-9 px-3.5 text-[13.5px]">
+                  Tirar
+                </button>
+              </>
+            )}
+          </div>
+        </Section>
+        <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 bg-cocoa-2 px-1 py-3">
+          {dirty && (
+            <>
+              <button type="button" onClick={() => setF({ display_name: me.display_name, pronouns: me.pronouns, bio: me.bio, custom_status: me.custom_status })} className="link-u px-3 text-[14px] text-oat/60">
+                Desfazer
+              </button>
+              <button type="button" onClick={() => void save(f).then((ok) => ok && toast("Perfil salvo."))} className="btn-ember h-10 px-5 text-[14px]">
+                Salvar alterações
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* prévia ao vivo do cartão */}
+      <div className="lg:sticky lg:top-0 lg:self-start">
+        <p className="label mb-3 text-oat/40">Prévia</p>
+        <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: "var(--color-cocoa-0)" }}>
+          <div className="h-[100px]" style={{ background: `color-mix(in srgb, ${me.accent} 65%, #18191c)` }}>
+            {me.banner && <AnimImg media={me.banner} alt="" className="size-full object-cover" play />}
+          </div>
+          <div className="px-4 pb-4">
+            <span className="-mt-10 inline-block rounded-full bg-cocoa-0 p-1.5">
+              <Avatar name={f.display_name || me.display_name} avatar={me.avatar} accent={me.accent} size={72} status={me.status} play />
+            </span>
+            <div className="mt-1 rounded-[14px] bg-cocoa-2 p-3">
+              <p className="font-display text-[22px] font-semibold leading-tight">{f.display_name || " "}</p>
+              <p className="text-[13px] text-oat/55">
+                @{me.username}
+                {f.pronouns && ` · ${f.pronouns}`}
+              </p>
+              {f.custom_status && <p className="mt-2 text-[13px]">{f.custom_status}</p>}
+              {f.bio && <p className="mt-2 whitespace-pre-wrap border-t border-oat/[0.08] pt-2 text-[13px] text-oat/80">{f.bio}</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountTab() {
+  const me = useStore((s) => s.me)!;
+  const save = useSaveMe();
+  const [username, setUsername] = useState(me.username);
+  const [pw, setPw] = useState({ current: "", new: "" });
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState("");
+  return (
+    <div className="max-w-xl">
+      <H>Conta</H>
+      <Section title="E-mail">
+        <p className="text-[15px]">{me.email ?? "—"}</p>
+        {me.has_google && <Tip>Conta ligada ao Google: dá para entrar pelo botão do Google.</Tip>}
+      </Section>
+      <Section title="Usuário" hint="Letras minúsculas, números, ponto e _. É assim que a turma te adiciona.">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-oat/35">@</span>
+            <input className="field pl-7" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))} />
+          </div>
+          {username !== me.username && (
+            <button type="button" onClick={() => void save({ username }).then((r) => r && toast("Usuário trocado."))} className="btn-ember px-4 text-[14px]">
+              Salvar
+            </button>
+          )}
+        </div>
+      </Section>
+      <Section title={me.has_password ? "Trocar senha" : "Criar uma senha"} hint={me.has_password ? "As outras sessões abertas saem quando você troca." : "Assim você também consegue entrar com e-mail e senha."}>
+        <form
+          className="space-y-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setError("");
+            setOk("");
+            try {
+              await api("/auth/password", { json: pw });
+              setPw({ current: "", new: "" });
+              setOk("Senha salva.");
+              useStore.setState((s) => ({ me: s.me ? { ...s.me, has_password: true } : s.me }));
+            } catch (err) {
+              setError(errorText(err));
+            }
+          }}
+        >
+          {me.has_password && <input className="field" type="password" placeholder="Senha atual" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" />}
+          <input className="field" type="password" placeholder="Senha nova (8+ caracteres)" value={pw.new} onChange={(e) => setPw({ ...pw, new: e.target.value })} minLength={8} autoComplete="new-password" />
+          <button type="submit" disabled={pw.new.length < 8} className="btn-ember h-10 px-5 text-[14px]">
+            Salvar senha
+          </button>
+          <FormError>{error}</FormError>
+          {ok && <p className="text-[13.5px] text-moss">{ok}</p>}
+        </form>
+      </Section>
+    </div>
+  );
+}
+
+function VoiceTab() {
+  const v = useVoice();
+  const [devices, setDevices] = useState<{ audioinput: MediaDeviceInfo[]; audiooutput: MediaDeviceInfo[]; videoinput: MediaDeviceInfo[] }>({ audioinput: [], audiooutput: [], videoinput: [] });
+  const [listening, setListening] = useState(false);
+  const room = v.call.room;
+
+  useEffect(() => {
+    void Promise.all([Room.getLocalDevices("audioinput", false), Room.getLocalDevices("audiooutput", false), Room.getLocalDevices("videoinput", false)])
+      .then(([a, o, c]) => setDevices({ audioinput: a, audiooutput: o, videoinput: c }))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!listening) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      v.setPrefs({ pttKey: e.code });
+      setListening(false);
+    };
+    window.addEventListener("keydown", onKey, { once: true });
+    return () => window.removeEventListener("keydown", onKey);
+  }, [listening, v]);
+
+  const set = (p: Partial<VoicePrefs>) => v.setPrefs(p);
+  const fill = (n: number) => ({ ["--fill" as string]: `${n * 100}%` });
+
+  return (
+    <div className="max-w-xl">
+      <H>Voz e vídeo</H>
+      <Section title="Modo de entrada">
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            [false, "Detecção de voz", "o mic fica aberto"],
+            [true, "Apertar para falar", "segura uma tecla"],
+          ].map(([val, label, hint]) => (
+            <button
+              key={String(val)}
+              type="button"
+              onClick={() => set({ ptt: val as boolean })}
+              className={`press rounded-[12px] border-2 p-3 text-left ${v.prefs.ptt === val ? "border-ember bg-ember/10" : "border-transparent bg-cocoa-3 hover:bg-cocoa-4"}`}
+            >
+              <span className="block text-[14.5px] font-semibold">{label as string}</span>
+              <span className="text-[12.5px] text-oat/50">{hint as string}</span>
+            </button>
+          ))}
+        </div>
+        {v.prefs.ptt && (
+          <div className="mt-3 flex items-center gap-3">
+            <span className="text-[14px] text-oat/70">Tecla:</span>
+            <button type="button" onClick={() => setListening(true)} className={`press min-w-[90px] rounded-[10px] px-3 py-2 text-[14px] font-bold ${listening ? "bg-ember text-white" : "bg-cocoa-0"}`}>
+              {listening ? "Aperte uma tecla…" : keyName(v.prefs.pttKey)}
+            </button>
+            <Tip>Funciona com a aba do navegador em foco.</Tip>
+          </div>
+        )}
+      </Section>
+      <Section title="Microfone">
+        <label className="flex items-center justify-between gap-4 py-1">
+          <span>
+            <span className="block text-[14.5px] font-medium">Redução de ruído</span>
+            <span className="text-[12.5px] text-oat/50">Corta ventilador, teclado e barulho de fundo.</span>
+          </span>
+          <Toggle checked={v.prefs.noiseSuppression} onChange={(x) => set({ noiseSuppression: x })} label="Redução de ruído" />
+        </label>
+        <label className="mt-3 flex items-center justify-between gap-4 py-1">
+          <span>
+            <span className="block text-[14.5px] font-medium">Entrar mutado</span>
+            <span className="text-[12.5px] text-oat/50">O microfone começa desligado quando você entra numa call.</span>
+          </span>
+          <Toggle checked={v.prefs.startMuted} onChange={(x) => set({ startMuted: x })} label="Entrar mutado" />
+        </label>
+      </Section>
+      <Section title="Sons">
+        <label className="block text-[14px]">
+          Volume do soundboard e dos sons de entrada
+          <input type="range" className="range mt-2 w-full text-oat" min={0} max={1} step={0.05} value={v.prefs.sfxVolume} style={fill(v.prefs.sfxVolume)} onChange={(e) => set({ sfxVolume: Number(e.target.value) })} />
+        </label>
+        <label className="mt-3 flex items-center justify-between gap-4 py-1">
+          <span className="text-[14.5px] font-medium">Tocar o som de entrada personalizado de cada um</span>
+          <Toggle checked={v.prefs.joinSounds} onChange={(x) => set({ joinSounds: x })} label="Sons de entrada" />
+        </label>
+      </Section>
+      <Section
+        title="Clipes"
+        hint="Enquanto alguém compartilha a tela, o navegador guarda os últimos ~40 segundos (com o som da tela e as vozes). O botão de tesoura ou Alt+C salva o lance no canal de clipes. Em PC mais fraco, desligue."
+      >
+        <label className="flex items-center justify-between gap-4 py-1">
+          <span className="text-[14.5px] font-medium">Guardar os últimos segundos para clipar</span>
+          <Toggle checked={v.prefs.clipBuffer} onChange={(x) => set({ clipBuffer: x })} label="Clipes" />
+        </label>
+      </Section>
+      <Section title="Dispositivos" hint={room ? undefined : "A troca vale para a próxima call; dentro da call muda na hora."}>
+        {(
+          [
+            ["audioinput", "Microfone"],
+            ["audiooutput", "Saída de som"],
+            ["videoinput", "Câmera"],
+          ] as const
+        ).map(([k, label]) =>
+          devices[k].length ? (
+            <label key={k} className="mb-3 block">
+              <span className="mb-1 block text-[13px] text-oat/60">{label}</span>
+              <select
+                className="field h-10 !py-0"
+                defaultValue={room?.getActiveDevice(k) ?? ""}
+                onChange={(e) => {
+                  if (room) void room.switchActiveDevice(k, e.target.value).catch(() => {});
+                }}
+              >
+                {devices[k].map((d, i) => (
+                  <option key={d.deviceId || i} value={d.deviceId}>
+                    {d.label || `${label} ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null,
+        )}
+        {!devices.audioinput.length && <Tip>O navegador só mostra os aparelhos depois que você libera o microfone (entre numa call uma vez).</Tip>}
+      </Section>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* configurações do servidor                                           */
+/* ------------------------------------------------------------------ */
+
+function ServerSettings({ server, tab: initial }: { server: Server; tab?: string }) {
+  const me = useStore((s) => s.me)!;
+  const role = server.members.find((m) => m.user.id === me.id)?.role ?? "member";
+  const admin = role !== "member";
+  const [tab, setTab] = useState(initial ?? (admin ? "geral" : "sons"));
+  const tabs: [string, string][] = [
+    ...(admin ? ([["geral", "Visão geral"]] as [string, string][]) : []),
+    ["sons", "Soundboard"],
+    ["emojis", "Emojis"],
+    ...(admin
+      ? ([
+          ["canais", "Canais"],
+          ["membros", "Membros"],
+        ] as [string, string][])
+      : []),
+  ];
+  return (
+    <SettingsFrame title={server.name} tab={tab} setTab={setTab} tabs={tabs}>
+      {tab === "geral" && <ServerGeneral server={server} owner={role === "owner"} />}
+      {tab === "sons" && <SoundsTab server={server} admin={admin} />}
+      {tab === "emojis" && <EmojisTab server={server} admin={admin} />}
+      {tab === "canais" && <ChannelsTab server={server} />}
+      {tab === "membros" && <MembersTab server={server} owner={role === "owner"} />}
+    </SettingsFrame>
+  );
+}
+
+function ServerGeneral({ server, owner }: { server: Server; owner: boolean }) {
+  const router = useRouter();
+  const [f, setF] = useState({ name: server.name, description: server.description });
+  const [busy, setBusy] = useState<string | null>(null);
+  const dirty = f.name !== server.name || f.description !== server.description;
+
+  async function patch(p: Record<string, unknown>) {
+    try {
+      await api(`/servers/${server.id}`, { method: "PATCH", json: p });
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+  async function media(kind: "icon" | "banner", file: File) {
+    setBusy(kind);
+    try {
+      await upload(`/servers/${server.id}/${kind}`, file);
+    } catch (e) {
+      toast(errorText(e));
+    }
+    setBusy(null);
+  }
+
+  return (
+    <div className="max-w-xl">
+      <H>Visão geral</H>
+      <Section title="Ícone e capa" hint="Animados também valem. A capa aparece no topo da lista de canais.">
+        <div className="flex items-center gap-4">
+          <ServerIcon name={server.name} icon={server.icon} accent={server.accent} size={72} className="group" />
+          <div className="flex flex-wrap gap-2">
+            <FileButton accept="image/png,image/jpeg,image/gif,image/webp" onFile={(f) => void media("icon", f)} className="btn-ember h-9 px-3.5 text-[13.5px]">
+              <ImagePlus className="size-4" /> {busy === "icon" ? "Enviando…" : "Trocar ícone"}
+            </FileButton>
+            <FileButton accept="image/png,image/jpeg,image/gif,image/webp" onFile={(f) => void media("banner", f)}>
+              <ImagePlus className="size-4" /> {busy === "banner" ? "Enviando…" : "Trocar capa"}
+            </FileButton>
+          </div>
+        </div>
+      </Section>
+      <Section title="Nome">
+        <input className="field" value={f.name} maxLength={48} onChange={(e) => setF({ ...f, name: e.target.value })} />
+      </Section>
+      <Section title="Descrição" hint="Aparece no convite.">
+        <textarea className="field min-h-[80px]" value={f.description} maxLength={200} onChange={(e) => setF({ ...f, description: e.target.value })} />
+      </Section>
+      <Section title="Cor do servidor">
+        <div className="flex flex-wrap gap-2">
+          {ACCENTS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={`Cor ${c}`}
+              onClick={() => void patch({ accent: c })}
+              className="press size-9 rounded-[11px]"
+              style={{ background: c, boxShadow: server.accent === c ? "0 0 0 2px var(--color-cocoa-2), 0 0 0 4px var(--color-oat)" : undefined }}
+            />
+          ))}
+        </div>
+      </Section>
+      <Section title="Hall da Fama" hint="Quantas pessoas diferentes precisam reagir (sem contar quem escreveu) para a mensagem entrar no Hall.">
+        <div className="flex flex-wrap gap-1.5">
+          {[1, 2, 3, 4, 5, 7, 10].map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => void patch({ hall_threshold: n })}
+              className={`press h-9 min-w-9 rounded-[10px] px-3 text-[14px] font-semibold tabular-nums ${
+                server.hall_threshold === n ? "bg-ember text-white" : "bg-cocoa-0 text-oat/70 hover:text-oat"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </Section>
+      {dirty && (
+        <div className="flex justify-end gap-2 py-2">
+          <button type="button" onClick={() => void patch(f).then(() => toast("Servidor salvo."))} className="btn-ember h-10 px-5 text-[14px]">
+            Salvar alterações
+          </button>
+        </div>
+      )}
+      {owner && (
+        <Section title="Zona de perigo">
+          <button
+            type="button"
+            onClick={async () => {
+              if (prompt(`Isso apaga ${server.name}, todos os canais e mensagens. Para confirmar, digite o nome do servidor:`) !== server.name) return;
+              try {
+                await api(`/servers/${server.id}`, { method: "DELETE" });
+                closeModal();
+                router.replace("/app");
+              } catch (e) {
+                toast(errorText(e));
+              }
+            }}
+            className="press flex h-10 items-center gap-2 rounded-[12px] border border-rust/60 px-4 text-[14px] font-semibold text-[#ff8f92] hover:bg-rust hover:text-oat"
+          >
+            <Trash2 className="size-4" /> Apagar servidor
+          </button>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function SoundsTab({ server, admin }: { server: Server; admin: boolean }) {
+  const me = useStore((s) => s.me)!;
+  const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("🔊");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <div className="max-w-2xl">
+      <H>Soundboard</H>
+      <p className="-mt-3 mb-5 text-[14px] text-oat/55">Sons que qualquer um toca para todo mundo na call. Até 60 por servidor, 2 MB cada (até 8 segundos tocam).</p>
+      <form
+        className="rounded-[14px] bg-cocoa-3 p-4"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!file) return setError("Escolha um arquivo de som.");
+          setBusy(true);
+          setError("");
+          try {
+            await upload(`/servers/${server.id}/sounds`, file, { name, emoji });
+            setName("");
+            setFile(null);
+          } catch (err) {
+            setError(errorText(err));
+          }
+          setBusy(false);
+        }}
+      >
+        <div className="flex flex-wrap gap-2">
+          <input className="field !w-16 text-center text-[20px]" value={emoji} onChange={(e) => setEmoji(e.target.value.slice(-2))} aria-label="Emoji do som" />
+          <input className="field min-w-[160px] flex-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome (ex.: bruh, risada)" maxLength={32} required />
+          <FileButton
+            accept="audio/*,.mp3,.ogg,.wav,.m4a,.webm"
+            onFile={(f) => {
+              setFile(f);
+              if (!name) setName(f.name.replace(/\.[^.]+$/, "").slice(0, 32));
+            }}
+            className="btn-quiet h-[46px] px-3.5 text-[13.5px]"
+          >
+            <Upload className="size-4" /> {file ? file.name.slice(0, 18) : "Arquivo"}
+          </FileButton>
+          <button type="submit" disabled={busy} className="btn-ember h-[46px] px-4 text-[14px]">
+            {busy ? "Enviando…" : "Adicionar"}
+          </button>
+        </div>
+        <FormError>{error}</FormError>
+      </form>
+      <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {server.sounds.map((s) => (
+          <div key={s.id} className="group flex items-center gap-2 rounded-[12px] bg-cocoa-3 p-2.5">
+            <button type="button" onClick={() => void new Audio(s.url).play()} aria-label={`Ouvir ${s.name}`} className="press grid size-9 shrink-0 place-items-center rounded-[10px] bg-cocoa-5 text-[18px]">
+              {s.emoji || "🔊"}
+            </button>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{s.name}</span>
+            {(admin || s.uploader_id === me.id) && (
+              <button
+                type="button"
+                onClick={() => void api(`/sounds/${s.id}`, { method: "DELETE" }).catch((e) => toast(errorText(e)))}
+                aria-label={`Apagar ${s.name}`}
+                className="press hidden size-7 place-items-center rounded-[8px] text-rust hover:bg-rust/15 group-hover:grid"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!server.sounds.length && <p className="mt-6 text-[14px] text-oat/45">Nenhum som ainda. Comece pelo clássico “bruh”.</p>}
+    </div>
+  );
+}
+
+function EmojisTab({ server, admin }: { server: Server; admin: boolean }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <div className="max-w-2xl">
+      <H>Emojis do servidor</H>
+      <p className="-mt-3 mb-5 text-[14px] text-oat/55">
+        Use no chat com <code className="rounded bg-cocoa-0 px-1">:nome:</code>. PNG, GIF ou WebP de até 1 MB, animados também.
+      </p>
+      <div className="flex flex-wrap gap-2 rounded-[14px] bg-cocoa-3 p-4">
+        <div className="relative min-w-[180px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-oat/35">:</span>
+          <input className="field px-6" value={name} onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} placeholder="nome_do_emoji" maxLength={32} />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-oat/35">:</span>
+        </div>
+        <FileButton
+          accept="image/png,image/gif,image/webp,image/jpeg"
+          className="btn-ember h-[46px] px-4 text-[14px]"
+          onFile={async (f) => {
+            setError("");
+            const n = name || f.name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 32);
+            try {
+              await upload(`/servers/${server.id}/emojis`, f, { name: n });
+              setName("");
+            } catch (err) {
+              setError(errorText(err));
+            }
+          }}
+        >
+          <Upload className="size-4" /> Subir emoji
+        </FileButton>
+        <FormError>{error}</FormError>
+      </div>
+      <div className="mt-5 grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {server.emojis.map((e) => (
+          <div key={e.id} className="group flex items-center gap-2 rounded-[12px] bg-cocoa-3 p-2.5">
+            <img src={e.url} alt={e.name} className="size-8 object-contain" />
+            <span className="min-w-0 flex-1 truncate text-[13px]">:{e.name}:</span>
+            {admin && (
+              <button type="button" onClick={() => void api(`/emojis/${e.id}`, { method: "DELETE" }).catch((x) => toast(errorText(x)))} aria-label={`Apagar ${e.name}`} className="hidden text-rust group-hover:block">
+                <Trash2 className="size-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChannelsTab({ server }: { server: Server }) {
+  return (
+    <div className="max-w-xl">
+      <H>Canais</H>
+      <div className="space-y-2">
+        {server.channels.map((c) => (
+          <ChannelRow key={c.id} serverId={server.id} id={c.id} name={c.name} topic={c.topic} type={c.type} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChannelRow({ id, name, topic, type }: { serverId: string; id: string; name: string; topic: string; type: "text" | "voice" }) {
+  const [f, setF] = useState({ name, topic });
+  const dirty = f.name !== name || f.topic !== topic;
+  return (
+    <div className="rounded-[12px] bg-cocoa-3 p-3">
+      <div className="flex items-center gap-2">
+        {type === "text" ? <Hash className="size-4 text-oat/45" /> : <Volume2 className="size-4 text-oat/45" />}
+        <input className="field h-9 flex-1 !py-0" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} aria-label="Nome do canal" />
+        <button
+          type="button"
+          onClick={async () => {
+            if (!confirm(`Apagar ${type === "text" ? "#" : ""}${name}? As mensagens vão junto.`)) return;
+            await api(`/channels/${id}`, { method: "DELETE" }).catch((e) => toast(errorText(e)));
+          }}
+          aria-label="Apagar canal"
+          className="press grid size-9 place-items-center rounded-[10px] text-rust hover:bg-rust/15"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </div>
+      {type === "text" && <input className="field mt-2 h-9 !py-0 text-[13.5px]" value={f.topic} placeholder="Tópico do canal" onChange={(e) => setF({ ...f, topic: e.target.value })} />}
+      {dirty && (
+        <button type="button" onClick={() => void api(`/channels/${id}`, { method: "PATCH", json: f }).catch((e) => toast(errorText(e)))} className="btn-ember mt-2 h-8 px-3 text-[13px]">
+          Salvar
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MembersTab({ server, owner }: { server: Server; owner: boolean }) {
+  const me = useStore((s) => s.me)!;
+  return (
+    <div className="max-w-2xl">
+      <H>Membros</H>
+      <ul className="divide-y divide-oat/[0.06]">
+        {server.members.map((m) => (
+          <li key={m.user.id} className="flex items-center gap-3 py-2.5">
+            <Avatar name={m.user.display_name} avatar={m.user.avatar} accent={m.user.accent} size={36} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">{m.user.display_name}</span>
+              <span className="text-[12.5px] text-oat/45">@{m.user.username}</span>
+            </span>
+            {m.role === "owner" ? (
+              <span className="text-[13px] text-honey">Dono</span>
+            ) : owner ? (
+              <select
+                value={m.role}
+                onChange={async (e) => {
+                  const role = e.target.value;
+                  if (role === "owner" && !confirm(`Passar a posse do servidor para ${m.user.display_name}? Você vira admin.`)) return;
+                  await api(`/servers/${server.id}/members/${m.user.id}`, { method: "PATCH", json: { role } }).catch((x) => toast(errorText(x)));
+                }}
+                className="rounded-[8px] bg-cocoa-0 px-2 py-1.5 text-[13px] outline-none"
+              >
+                <option value="member">Membro</option>
+                <option value="admin">Admin</option>
+                <option value="owner">Passar a posse</option>
+              </select>
+            ) : (
+              <span className="text-[13px] text-oat/55">{m.role === "admin" ? "Admin" : "Membro"}</span>
+            )}
+            {m.user.id !== me.id && m.role !== "owner" && (owner || m.role === "member") && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!confirm(`Tirar ${m.user.display_name} do servidor?`)) return;
+                  await api(`/servers/${server.id}/members/${m.user.id}`, { method: "DELETE" }).catch((x) => toast(errorText(x)));
+                }}
+                className="press rounded-[8px] px-2 py-1.5 text-[13px] text-[#ff8f92] hover:bg-rust hover:text-oat"
+              >
+                Remover
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

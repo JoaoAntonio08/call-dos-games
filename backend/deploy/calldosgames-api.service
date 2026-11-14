@@ -1,0 +1,20 @@
+# /etc/systemd/system/calldosgames-api.service
+[Unit]
+Description=Call dos Games - API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=calldosgames
+WorkingDirectory=/opt/calldosgames/backend
+# 1 worker só: presença, digitando e quem está em call ficam na memória do processo
+ExecStart=/opt/calldosgames/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ReadWritePaths=/var/lib/calldosgames
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# /etc/livekit.yaml — só para a opção B (LiveKit próprio).
+port: 7880
+bind_addresses:
+  - 127.0.0.1   # o Caddy faz o wss na frente
+rtc:
+  tcp_port: 7881
+  # áudio e vídeo passam direto por UDP (não passam pela Cloudflare)
+  port_range_start: 50000
+  port_range_end: 50200
+  use_external_ip: true
+keys:
+  # chave: segredo. Gere o segredo com: openssl rand -base64 36
+  # e coloque os mesmos valores em LIVEKIT_API_KEY / LIVEKIT_API_SECRET no backend/.env
+  cdg: TROQUE_POR_UM_SEGREDO_LONGO
+logging:
+  level: warn

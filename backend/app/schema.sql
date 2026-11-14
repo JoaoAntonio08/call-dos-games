@@ -1,0 +1,210 @@
+-- Call dos Games: esquema do banco. Idempotente: roda inteiro a cada inicialização.
+
+CREATE TABLE IF NOT EXISTS files (
+    id          BIGINT PRIMARY KEY,
+    owner_id    BIGINT,
+    kind        TEXT NOT NULL,              -- avatar | banner | icon | attachment | sound | emoji
+    mime        TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    name        TEXT NOT NULL DEFAULT '',
+    width       INTEGER,
+    height      INTEGER,
+    animated    BOOLEAN NOT NULL DEFAULT FALSE,
+    path        TEXT NOT NULL,
+    still_path  TEXT,                       -- primeiro quadro, para imagens animadas
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id             BIGINT PRIMARY KEY,
+    username       TEXT NOT NULL,
+    display_name   TEXT NOT NULL,
+    email          TEXT,
+    password_hash  TEXT,
+    google_sub     TEXT,
+    avatar_id      BIGINT REFERENCES files(id) ON DELETE SET NULL,
+    banner_id      BIGINT REFERENCES files(id) ON DELETE SET NULL,
+    join_sound_id  BIGINT REFERENCES files(id) ON DELETE SET NULL,
+    bio            TEXT NOT NULL DEFAULT '',
+    accent         TEXT NOT NULL DEFAULT '#5865f2',
+    status         TEXT NOT NULL DEFAULT 'online',   -- online | idle | dnd | invisible
+    custom_status  TEXT NOT NULL DEFAULT '',
+    pronouns       TEXT NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_key ON users (lower(username));
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users (lower(email)) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_key ON users (google_sub) WHERE google_sub IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id          BIGINT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_agent  TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used        BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS servers (
+    id           BIGINT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    owner_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    icon_id      BIGINT REFERENCES files(id) ON DELETE SET NULL,
+    banner_id    BIGINT REFERENCES files(id) ON DELETE SET NULL,
+    accent       TEXT NOT NULL DEFAULT '#5865f2',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS members (
+    server_id  BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',   -- owner | admin | member
+    nickname   TEXT NOT NULL DEFAULT '',
+    joined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (server_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS members_user_idx ON members (user_id);
+
+CREATE TABLE IF NOT EXISTS channels (
+    id          BIGINT PRIMARY KEY,
+    server_id   BIGINT REFERENCES servers(id) ON DELETE CASCADE,   -- NULL = conversa direta
+    type        TEXT NOT NULL,                                     -- text | voice | dm
+    name        TEXT NOT NULL DEFAULT '',
+    topic       TEXT NOT NULL DEFAULT '',
+    position    INTEGER NOT NULL DEFAULT 0,
+    last_message_id BIGINT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS channels_server_idx ON channels (server_id);
+
+CREATE TABLE IF NOT EXISTS dm_participants (
+    channel_id  BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS dm_user_idx ON dm_participants (user_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id           BIGINT PRIMARY KEY,
+    channel_id   BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id    BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    content      TEXT NOT NULL DEFAULT '',
+    reply_to     BIGINT,
+    attachments  JSONB NOT NULL DEFAULT '[]',
+    kind         TEXT NOT NULL DEFAULT 'default',   -- default | join | system | hall
+    edited_at    TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS messages_channel_idx ON messages (channel_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS reactions (
+    message_id  BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji       TEXT NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+);
+
+CREATE TABLE IF NOT EXISTS read_states (
+    user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id    BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    last_read_id  BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+    code        TEXT PRIMARY KEY,
+    server_id   BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    creator_id  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    uses        INTEGER NOT NULL DEFAULT 0,
+    max_uses    INTEGER,
+    expires_at  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS friendships (
+    requester_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    addressee_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status        TEXT NOT NULL DEFAULT 'pending',   -- pending | accepted
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (requester_id, addressee_id)
+);
+CREATE INDEX IF NOT EXISTS friendships_addressee_idx ON friendships (addressee_id);
+
+CREATE TABLE IF NOT EXISTS sounds (
+    id           BIGINT PRIMARY KEY,
+    server_id    BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    uploader_id  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    name         TEXT NOT NULL,
+    emoji        TEXT NOT NULL DEFAULT '',
+    file_id      BIGINT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    volume       REAL NOT NULL DEFAULT 1,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sounds_server_idx ON sounds (server_id);
+
+CREATE TABLE IF NOT EXISTS emojis (
+    id          BIGINT PRIMARY KEY,
+    server_id   BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    file_id     BIGINT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS emojis_name_key ON emojis (server_id, lower(name));
+
+-- paleta nova (2026-11): cor padrão de quem nunca escolheu uma
+ALTER TABLE users ALTER COLUMN accent SET DEFAULT '#5865f2';
+ALTER TABLE servers ALTER COLUMN accent SET DEFAULT '#5865f2';
+UPDATE users SET accent = '#5865f2' WHERE accent = '#d9663a';
+UPDATE servers SET accent = '#5865f2' WHERE accent = '#d9663a';
+
+-- Hall da Fama: mensagem que juntou reação de N pessoas diferentes
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS hall_threshold INT NOT NULL DEFAULT 3;
+CREATE TABLE IF NOT EXISTS hall_entries (
+    message_id  BIGINT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    server_id   BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    added_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS hall_entries_server ON hall_entries (server_id, added_at DESC);
+
+-- fila de vídeos de cada canal de voz (ou conversa)
+CREATE TABLE IF NOT EXISTS queue_items (
+    id          BIGINT PRIMARY KEY,
+    channel_id  BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    video_id    TEXT NOT NULL,
+    start_at    INT NOT NULL DEFAULT 0,
+    title       TEXT NOT NULL DEFAULT '',
+    author      TEXT NOT NULL DEFAULT '',
+    added_by    BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS queue_items_channel ON queue_items (channel_id);
+CREATE TABLE IF NOT EXISTS queue_votes (
+    item_id  BIGINT NOT NULL REFERENCES queue_items(id) ON DELETE CASCADE,
+    user_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, user_id)
+);
+
+-- "onde paramos": o que a turma está assistindo e em que episódio parou
+CREATE TABLE IF NOT EXISTS shows (
+    id          BIGINT PRIMARY KEY,
+    server_id   BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'anime',     -- anime | serie | filme | jogo | outro
+    status      TEXT NOT NULL DEFAULT 'watching',  -- watching | paused | planned | done
+    season      INT,
+    episode     INT NOT NULL DEFAULT 0,
+    total       INT,
+    note        TEXT NOT NULL DEFAULT '',
+    created_by  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    updated_by  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS shows_server ON shows (server_id, updated_at DESC);

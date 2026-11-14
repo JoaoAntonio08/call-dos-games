@@ -1,0 +1,443 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AudioPresets,
+  ConnectionState,
+  LocalAudioTrack,
+  LocalTrack,
+  Room,
+  RoomEvent,
+  Track,
+  TrackEvent,
+  VideoPresets,
+  type Participant,
+  type VideoCodec,
+} from "livekit-client";
+
+/* ------------------------------------------------------------------ */
+/* Qualidade do compartilhamento de tela                               */
+/* ------------------------------------------------------------------ */
+
+export const RESOLUTIONS = {
+  "720p": { width: 1280, height: 720, label: "720p" },
+  "1080p": { width: 1920, height: 1080, label: "1080p" },
+  "1440p": { width: 2560, height: 1440, label: "1440p" },
+  "2160p": { width: 3840, height: 2160, label: "4K" },
+} as const;
+export type ResolutionId = keyof typeof RESOLUTIONS;
+
+export type ShareMode = "video" | "game";
+
+export interface ShareSettings {
+  resolution: ResolutionId;
+  fps: 30 | 60;
+  mode: ShareMode;
+  audio: boolean;
+  codec: VideoCodec;
+}
+
+/** Padrão econômico: cabe bem na franquia grátis do LiveKit Cloud. */
+export const DEFAULT_SHARE: ShareSettings = {
+  resolution: "720p",
+  fps: 30,
+  mode: "video",
+  audio: true,
+  codec: "h264",
+};
+
+/** Bitrate máximo de envio (bits/s) para cada combinação. Ajustado para conteúdo com muito movimento. */
+export function bitrateFor(res: ResolutionId, fps: 30 | 60): number {
+  const table: Record<ResolutionId, [number, number]> = {
+    "720p": [2_500_000, 4_000_000],
+    "1080p": [5_000_000, 8_000_000],
+    "1440p": [9_000_000, 14_000_000],
+    "2160p": [16_000_000, 25_000_000],
+  };
+  return table[res][fps === 60 ? 1 : 0];
+}
+
+/** Franquia mensal de dados do plano grátis (Build) do LiveKit Cloud, em GB. */
+export const FREE_TIER_GB = 50;
+
+/** GB por hora que cada pessoa assistindo consome, no pior caso (bitrate máximo). */
+export function gbPerHour(res: ResolutionId, fps: 30 | 60): number {
+  return (bitrateFor(res, fps) * 3600) / 8 / 1e9;
+}
+
+/* ------------------------------------------------------------------ */
+/* Estado de cada pessoa na call                                       */
+/* ------------------------------------------------------------------ */
+
+export interface Peer {
+  identity: string;
+  name: string;
+  isLocal: boolean;
+  speaking: boolean;
+  micOn: boolean;
+  mic?: Track;
+  camera?: Track;
+  screen?: Track;
+  screenAudio?: Track;
+  /** dados do perfil que o servidor coloca no token (foto, cor, som de entrada) */
+  meta: PeerMeta;
+}
+
+export interface PeerMeta {
+  avatar?: { url: string; still: string; animated: boolean } | null;
+  accent?: string;
+  username?: string;
+  join_sound?: string | null;
+}
+
+export function parseMeta(raw: string | undefined): PeerMeta {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as PeerMeta;
+  } catch {
+    return {};
+  }
+}
+
+function trackOf(p: Participant, source: Track.Source): Track | undefined {
+  const pub = p.getTrackPublication(source);
+  if (!pub || pub.isMuted || !pub.track) return undefined;
+  return pub.track;
+}
+
+function snapshot(room: Room): Peer[] {
+  const all: Participant[] = [room.localParticipant, ...room.remoteParticipants.values()];
+  return all.map((p) => {
+    const micPub = p.getTrackPublication(Track.Source.Microphone);
+    return {
+      identity: p.identity,
+      name: p.name || p.identity.split("#")[0],
+      isLocal: p === room.localParticipant,
+      speaking: p.isSpeaking,
+      micOn: !!micPub && !micPub.isMuted,
+      mic: trackOf(p, Track.Source.Microphone),
+      camera: trackOf(p, Track.Source.Camera),
+      screen: trackOf(p, Track.Source.ScreenShare),
+      screenAudio: trackOf(p, Track.Source.ScreenShareAudio),
+      meta: parseMeta(p.metadata),
+    };
+  });
+}
+
+/** Quem chama decide de onde vem o token (call rápida por chave ou canal de servidor). */
+export type TokenFetcher = () => Promise<{ token: string; url: string }>;
+
+/** Token da call rápida (sem conta), gerado pela rota /api/token do próprio site. */
+export function keyTokenFetcher(key: string, name: string): TokenFetcher {
+  return async () => {
+    const res = await fetch("/api/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key, name }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { token?: string; url?: string; error?: string };
+    if (!res.ok || !data.token || !data.url) throw new Error(data.error || "Não foi possível entrar na sala.");
+    return { token: data.token, url: data.url };
+  };
+}
+
+export type CallStatus = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected" | "error";
+
+function describeMediaError(err: unknown, what: string): string {
+  const name = err instanceof Error ? err.name : "";
+  if (name === "NotAllowedError") return `Permissão negada para ${what}. Libere no cadeado da barra de endereço.`;
+  if (name === "NotFoundError") return `Nenhum dispositivo de ${what} encontrado.`;
+  if (name === "NotReadableError") return `O dispositivo de ${what} está sendo usado por outro programa.`;
+  return `Não foi possível ligar ${what}.`;
+}
+
+export function useCall() {
+  const roomRef = useRef<Room | null>(null);
+  const screenTracks = useRef<LocalTrack[]>([]);
+  const [status, setStatus] = useState<CallStatus>("idle");
+  const [error, setError] = useState<string>("");
+  const [notice, setNotice] = useState<string>("");
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [canPlayAudio, setCanPlayAudio] = useState(true);
+  const [sharing, setSharing] = useState<ShareSettings | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
+
+  const refresh = useCallback(() => {
+    const r = roomRef.current;
+    if (r) setPeers(snapshot(r));
+  }, []);
+
+  const flash = useCallback((msg: string) => setNotice(msg), []);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(""), 4500);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+
+  const stopShare = useCallback(async () => {
+    const r = roomRef.current;
+    const tracks = screenTracks.current;
+    screenTracks.current = [];
+    setSharing(null);
+    if (!r) return;
+    for (const t of tracks) {
+      try {
+        await r.localParticipant.unpublishTrack(t, true);
+      } catch {
+        t.stop();
+      }
+    }
+    refresh();
+  }, [refresh]);
+
+  const join = useCallback(
+    async (getToken: TokenFetcher, opts: {
+      mic: boolean;
+      camera: boolean;
+      noiseSuppression?: boolean;
+      /** sem avisos de entrou/saiu (o app de servidores tem os próprios sons) */
+      quiet?: boolean;
+      onPeerJoin?: (name: string, meta: PeerMeta) => void;
+      onPeerLeave?: (name: string) => void;
+    }) => {
+      if (roomRef.current) return false;
+      setStatus("connecting");
+      setError("");
+      try {
+        const data = await getToken();
+
+        const r = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+          audioCaptureDefaults: { echoCancellation: true, noiseSuppression: opts.noiseSuppression ?? true, autoGainControl: true },
+          videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
+          publishDefaults: { videoCodec: "vp8", simulcast: true, dtx: true, red: true },
+        });
+        roomRef.current = r;
+
+        const events = [
+          RoomEvent.ParticipantConnected,
+          RoomEvent.ParticipantDisconnected,
+          RoomEvent.TrackSubscribed,
+          RoomEvent.TrackUnsubscribed,
+          RoomEvent.TrackMuted,
+          RoomEvent.TrackUnmuted,
+          RoomEvent.TrackPublished,
+          RoomEvent.TrackUnpublished,
+          RoomEvent.LocalTrackPublished,
+          RoomEvent.LocalTrackUnpublished,
+          RoomEvent.ActiveSpeakersChanged,
+          RoomEvent.ParticipantNameChanged,
+        ] as const;
+        for (const ev of events) r.on(ev, refresh);
+        r.on(RoomEvent.ParticipantConnected, (p) => {
+          if (!opts.quiet) flash(`${p.name || "Alguém"} entrou na sala`);
+          opts.onPeerJoin?.(p.name || "Alguém", parseMeta(p.metadata));
+        });
+        r.on(RoomEvent.ParticipantDisconnected, (p) => {
+          if (!opts.quiet) flash(`${p.name || "Alguém"} saiu da sala`);
+          opts.onPeerLeave?.(p.name || "Alguém");
+        });
+        r.on(RoomEvent.ParticipantMetadataChanged, refresh);
+        r.on(RoomEvent.AudioPlaybackStatusChanged, () => setCanPlayAudio(r.canPlaybackAudio));
+        r.on(RoomEvent.ConnectionStateChanged, (s) => {
+          if (s === ConnectionState.Reconnecting || s === ConnectionState.SignalReconnecting) setStatus("reconnecting");
+          else if (s === ConnectionState.Connected) setStatus("connected");
+        });
+        r.on(RoomEvent.Disconnected, () => {
+          screenTracks.current = [];
+          setSharing(null);
+          setStatus((st) => (st === "error" ? st : "disconnected"));
+        });
+
+        await r.connect(data.url, data.token);
+        setRoom(r);
+        setStatus("connected");
+        setCanPlayAudio(r.canPlaybackAudio);
+        refresh();
+
+        if (opts.mic) {
+          try {
+            await r.localParticipant.setMicrophoneEnabled(true);
+          } catch (e) {
+            flash(describeMediaError(e, "o microfone"));
+          }
+        }
+        if (opts.camera) {
+          try {
+            await r.localParticipant.setCameraEnabled(true);
+          } catch (e) {
+            flash(describeMediaError(e, "a câmera"));
+          }
+        }
+        refresh();
+        return true;
+      } catch (e) {
+        roomRef.current?.disconnect();
+        roomRef.current = null;
+        setRoom(null);
+        setStatus("error");
+        setError(e instanceof Error ? e.message : "Não foi possível entrar na sala.");
+        return false;
+      }
+    },
+    [flash, refresh],
+  );
+
+  const leave = useCallback(async () => {
+    await stopShare();
+    await roomRef.current?.disconnect();
+    roomRef.current = null;
+    setRoom(null);
+    setPeers([]);
+    setStatus("disconnected");
+  }, [stopShare]);
+
+  // sai da sala ao fechar a página
+  useEffect(() => {
+    return () => {
+      roomRef.current?.disconnect();
+      roomRef.current = null;
+    };
+  }, []);
+
+  const toggleMic = useCallback(async () => {
+    const r = roomRef.current;
+    if (!r) return;
+    try {
+      await r.localParticipant.setMicrophoneEnabled(!r.localParticipant.isMicrophoneEnabled);
+    } catch (e) {
+      flash(describeMediaError(e, "o microfone"));
+    }
+    refresh();
+  }, [flash, refresh]);
+
+  /** Liga/desliga o microfone direto (usado pelo apertar-para-falar). */
+  const setMic = useCallback(
+    async (on: boolean) => {
+      const r = roomRef.current;
+      if (!r || r.localParticipant.isMicrophoneEnabled === on) return;
+      try {
+        await r.localParticipant.setMicrophoneEnabled(on);
+      } catch (e) {
+        flash(describeMediaError(e, "o microfone"));
+      }
+      refresh();
+    },
+    [flash, refresh],
+  );
+
+  /** Troca a redução de ruído do navegador sem sair da call. */
+  const setNoiseSuppression = useCallback(async (on: boolean) => {
+    const r = roomRef.current;
+    if (!r) return;
+    r.options.audioCaptureDefaults = { ...r.options.audioCaptureDefaults, noiseSuppression: on };
+    const pub = r.localParticipant.getTrackPublication(Track.Source.Microphone);
+    const track = pub?.track as LocalAudioTrack | undefined;
+    if (track) await track.restartTrack({ noiseSuppression: on, echoCancellation: true, autoGainControl: true }).catch(() => {});
+  }, []);
+
+  const toggleCamera = useCallback(async () => {
+    const r = roomRef.current;
+    if (!r) return;
+    try {
+      await r.localParticipant.setCameraEnabled(!r.localParticipant.isCameraEnabled);
+    } catch (e) {
+      flash(describeMediaError(e, "a câmera"));
+    }
+    refresh();
+  }, [flash, refresh]);
+
+  const startShare = useCallback(
+    async (s: ShareSettings) => {
+      const r = roomRef.current;
+      if (!r) return;
+      if (screenTracks.current.length) await stopShare();
+      const res = RESOLUTIONS[s.resolution];
+      let tracks: LocalTrack[];
+      try {
+        tracks = await r.localParticipant.createScreenTracks({
+          // áudio da aba/sistema sem os filtros de voz, para música e efeitos saírem limpos
+          audio: s.audio
+            ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 }
+            : false,
+          resolution: { width: res.width, height: res.height, frameRate: s.fps },
+          contentHint: "motion",
+          selfBrowserSurface: "exclude",
+          surfaceSwitching: "include",
+          systemAudio: "include",
+        });
+      } catch (e) {
+        const name = e instanceof Error ? e.name : "";
+        if (name !== "NotAllowedError" && name !== "AbortError") flash("Não foi possível compartilhar a tela.");
+        return;
+      }
+
+      const encoding = { maxBitrate: bitrateFor(s.resolution, s.fps), maxFramerate: s.fps, priority: "high" as const };
+      try {
+        for (const t of tracks) {
+          if (t.kind === Track.Kind.Video) {
+            await r.localParticipant.publishTrack(t, {
+              source: Track.Source.ScreenShare,
+              videoCodec: s.codec,
+              backupCodec: s.codec === "vp8" ? false : { codec: "vp8" },
+              simulcast: false,
+              screenShareEncoding: encoding,
+              videoEncoding: encoding,
+              // jogo: segura os fps; vídeo/anime: segura a nitidez
+              degradationPreference: s.mode === "game" ? "maintain-framerate" : "maintain-resolution",
+            });
+          } else {
+            await r.localParticipant.publishTrack(t, {
+              source: Track.Source.ScreenShareAudio,
+              audioPreset: AudioPresets.musicHighQualityStereo,
+              dtx: false,
+              red: false,
+              forceStereo: true,
+            });
+          }
+          // quando a pessoa clica em "Parar de compartilhar" na barra do navegador
+          t.once(TrackEvent.Ended, () => void stopShare());
+        }
+      } catch {
+        tracks.forEach((t) => t.stop());
+        flash("O servidor recusou o compartilhamento. Tente outro codec ou uma resolução menor.");
+        return;
+      }
+      screenTracks.current = tracks;
+      setSharing(s);
+      if (s.audio && !tracks.some((t) => t.kind === Track.Kind.Audio)) {
+        flash("Tela compartilhada sem som. Para ter áudio, marque “Compartilhar áudio” na janela do navegador.");
+      }
+      refresh();
+    },
+    [flash, refresh, stopShare],
+  );
+
+  const startAudio = useCallback(async () => {
+    await roomRef.current?.startAudio();
+    setCanPlayAudio(true);
+  }, []);
+
+  return {
+    room,
+    status,
+    error,
+    notice,
+    flash,
+    peers,
+    canPlayAudio,
+    sharing,
+    join,
+    leave,
+    toggleMic,
+    setMic,
+    setNoiseSuppression,
+    toggleCamera,
+    startShare,
+    stopShare,
+    startAudio,
+  };
+}
+
+export type Call = ReturnType<typeof useCall>;
