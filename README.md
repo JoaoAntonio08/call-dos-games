@@ -17,11 +17,11 @@ Feito com Next.js 16, Tailwind 4 e [LiveKit](https://livekit.io) no site, e Fast
 
 | Parte | Onde | Custo |
 |---|---|---|
-| Site (Next.js) | Vercel | grátis |
+| Site (Next.js) | servidor do amigo (ou Vercel) | grátis |
 | API + Postgres + arquivos | servidor do amigo | grátis |
 | Voz e vídeo | LiveKit Cloud (plano grátis) ou LiveKit no mesmo servidor | grátis |
 
-O passo a passo do servidor está em [backend/DEPLOY.md](backend/DEPLOY.md). Na Vercel, além das variáveis do LiveKit, cadastre `NEXT_PUBLIC_API_URL` com o endereço da API.
+O passo a passo para hospedar tudo (site, API e banco) no servidor do amigo está em [backend/DEPLOY.md](backend/DEPLOY.md). Atualizar depois: `sudo bash /opt/calldosgames/app/backend/scripts/atualizar.sh`.
 
 ## Servidor da turma no seu PC (enquanto o amigo não hospeda)
 

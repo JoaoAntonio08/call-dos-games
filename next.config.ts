@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // gera .next/standalone (servidor Node próprio) para rodar fora da Vercel; na Vercel não muda nada
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

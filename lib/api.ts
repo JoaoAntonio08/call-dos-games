@@ -1,7 +1,7 @@
 /* Cliente da API (FastAPI). O token fica no localStorage e vai no cabeçalho Authorization. */
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/^\uFEFF/, "").trim().replace(/\/$/, "");
-/** Em produção, o app com contas só funciona com o endereço da API configurado na Vercel. */
+/** Em produção, o app com contas só funciona com o endereço da API definido no build (NEXT_PUBLIC_API_URL). */
 export const API_READY = process.env.NODE_ENV !== "production" || !!process.env.NEXT_PUBLIC_API_URL;
 export const GATEWAY_URL = API_URL.replace(/^http/, "ws") + "/gateway";
 

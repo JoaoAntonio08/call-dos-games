@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "Servidor sem configuração do LiveKit. Cadastre LIVEKIT_URL, LIVEKIT_API_KEY e LIVEKIT_API_SECRET nas variáveis de ambiente da Vercel (ou no .env.local, rodando no PC).",
+          "Servidor sem configuração do LiveKit. Cadastre LIVEKIT_URL, LIVEKIT_API_KEY e LIVEKIT_API_SECRET no .env.local do site (ou nas variáveis de ambiente da Vercel).",
       },
       { status: 500 },
     );

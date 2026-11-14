@@ -1,0 +1,23 @@
+# /etc/systemd/system/calldosgames-site.service
+[Unit]
+Description=Call dos Games - site (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=calldosgames
+WorkingDirectory=/opt/calldosgames/app/.next/standalone
+# LIVEKIT_URL, LIVEKIT_API_KEY e LIVEKIT_API_SECRET (a call rápida /sala/... usa)
+EnvironmentFile=/opt/calldosgames/app/.env.local
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,14 @@
 # /etc/caddy/Caddyfile — troque os domínios pelos de vocês.
 # O Caddy pega o certificado HTTPS sozinho.
 
+# Site (Next.js). Pode ficar com a nuvem laranja da Cloudflare.
+cdg.exemplo.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+}
+
 # API + gateway (WebSocket). Pode ficar com a nuvem laranja da Cloudflare.
-api.exemplo.com {
+api.cdg.exemplo.com {
 	request_body {
 		max_size 90MB
 	}
@@ -11,6 +17,6 @@ api.exemplo.com {
 
 # Só se for rodar o LiveKit próprio (opção B do DEPLOY.md).
 # Na Cloudflare este precisa ficar com a nuvem CINZA (DNS only).
-voz.exemplo.com {
+voz.cdg.exemplo.com {
 	reverse_proxy 127.0.0.1:7880
 }
