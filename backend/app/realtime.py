@@ -23,6 +23,8 @@ class Hub:
         # canal de voz -> {usuário -> estado}
         self.voice: dict[int, dict[int, dict[str, Any]]] = {}
         self.user_voice: dict[int, int] = {}
+        # o que cada um está jogando agora (Steam)
+        self.games: dict[int, dict[str, Any]] = {}
 
     # ---------------- presença
     def online(self, user_id: int) -> bool:
@@ -106,16 +108,40 @@ class Hub:
             await self._announce_voice(old)
             self.user_voice.pop(user_id, None)
         if channel_id is not None:
+            mods = await self._mods(channel_id, user_id)
             prev = self.voice.setdefault(channel_id, {}).get(user_id, {})
             self.voice[channel_id][user_id] = {
-                "mic": bool(state.get("mic", True)),
-                "deaf": bool(state.get("deaf", False)),
+                # mutado/ensurdecido por um admin e volume para todos
+                "smute": mods["mute"],
+                "sdeaf": mods["deaf"],
+                "gain": mods["gain"],
+                "mic": bool(state.get("mic", True)) and not mods["mute"],
+                "deaf": bool(state.get("deaf", False)) or mods["deaf"],
                 "video": bool(state.get("video", False)),
                 "stream": bool(state.get("stream", False)),
                 "since": prev.get("since", int(time.time() * 1000)),
             }
             self.user_voice[user_id] = channel_id
             await self._announce_voice(channel_id)
+
+    async def _mods(self, channel_id: int, user_id: int) -> dict[str, Any]:
+        row = await pool().fetchrow(
+            "SELECT vm.mute, vm.deaf, vm.gain FROM voice_mods vm JOIN channels c ON c.server_id = vm.server_id WHERE c.id = $1 AND vm.user_id = $2",
+            channel_id,
+            user_id,
+        )
+        return {"mute": row["mute"], "deaf": row["deaf"], "gain": float(row["gain"])} if row else {"mute": False, "deaf": False, "gain": 1.0}
+
+    async def refresh_mods(self, channel_id: int, user_id: int, mods: dict[str, Any]) -> None:
+        st = self.voice.get(channel_id, {}).get(user_id)
+        if st is None:
+            return
+        st.update({"smute": mods["mute"], "sdeaf": mods["deaf"], "gain": mods["gain"]})
+        if mods["mute"]:
+            st["mic"] = False
+        if mods["deaf"]:
+            st["deaf"] = True
+        await self._announce_voice(channel_id)
 
     async def _announce_voice(self, channel_id: int) -> None:
         members = [{"user_id": sid(uid), **st} for uid, st in self.voice.get(channel_id, {}).items()]
@@ -163,7 +189,8 @@ async def gateway(ws: WebSocket) -> None:
         user_id,
     )
     voice = hub.voice_snapshot([int(r["id"]) for r in rows])
-    await ws.send_text(json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice}}))
+    games = {sid(uid): g for uid, g in hub.games.items()}
+    await ws.send_text(json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice, "games": games}}))
     if not was_online:
         await hub.broadcast_presence(user_id)
 

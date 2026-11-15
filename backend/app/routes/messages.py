@@ -18,7 +18,7 @@ MAX_ATTACHMENTS = 10
 
 
 SELECT_MESSAGES = """
-    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at,
+    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name,
            u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name, u.bio AS u_bio,
            u.accent AS u_accent, u.status AS u_status, u.custom_status AS u_custom_status, u.pronouns AS u_pronouns,
            u.created_at AS u_created_at, u.avatar_id AS u_avatar_id, av.animated AS u_avatar_animated,
@@ -64,7 +64,9 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
     out = []
     for r in rows:
         author = None
-        if r["u_id"] is not None:
+        if r["webhook_id"] is not None:
+            author = bot_author(r["webhook_id"], r["author_name"], r["created_at"])
+        elif r["u_id"] is not None:
             u = {k[2:]: v for k, v in dict(r).items() if k.startswith("u_")}
             author = user_out(u, presence=hub.presence(u["id"], u["status"]))
         atts = json.loads(r["attachments"]) if isinstance(r["attachments"], str) else r["attachments"]
@@ -88,6 +90,28 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
             }
         )
     return out
+
+
+def bot_author(webhook_id: int, name: str, created_at: Any) -> dict:
+    """Autor de mensagem de webhook: parece um usuário, com a marca de bot."""
+    return {
+        "id": sid(webhook_id), "username": "bot", "display_name": name or "Bot", "bio": "", "accent": "#5865f2",
+        "pronouns": "", "custom_status": "", "status": "online", "avatar": None, "banner": None, "join_sound": None,
+        "name_color": "", "theme": [], "badges": [], "created_at": created_at.isoformat(), "bot": True,
+    }
+
+
+async def post_webhook_message(channel_id: int, webhook_id: int, name: str, content: str) -> dict:
+    mid = new_id()
+    await pool().execute(
+        "INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name) VALUES ($1,$2,NULL,$3,'default',$4,$5)",
+        mid, channel_id, content, webhook_id, name,
+    )
+    await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)
+    msg = await message_by_id(mid, 0)
+    assert msg
+    await hub.to_channel(channel_id, "message_create", msg)
+    return msg
 
 
 async def fetch_messages(where: str, *args: Any, viewer: int, limit: int = 50) -> list[dict]:
@@ -141,6 +165,10 @@ class MessageIn(BaseModel):
     content: str = ""
     reply_to: str | None = None
     attachment_ids: list[str] = []
+    # figurinha da sua coleção
+    sticker_id: str | None = None
+    # GIF escolhido na busca (só links do GIPHY)
+    gif: dict | None = None
 
 
 @router.post("/channels/{channel_id}/messages")
@@ -165,6 +193,30 @@ async def create_message(channel_id: str, body: MessageIn, me: Auth = CurrentUse
                     {"id": sid(r["id"]), "url": file_url(r["id"]), "name": r["name"], "mime": r["mime"], "size": r["size"],
                      "width": r["width"], "height": r["height"], "animated": r["animated"]}
                 )
+    if body.sticker_id:
+        r = await pool().fetchrow(
+            """SELECT f.id, f.name, f.mime, f.size, f.width, f.height, f.animated FROM stickers s JOIN files f ON f.id = s.file_id
+               WHERE s.id = $1 AND s.user_id = $2""",
+            parse_id(body.sticker_id), me.id,
+        )
+        if not r:
+            raise err(404, "Figurinha não encontrada.")
+        attachments = [
+            {"id": sid(r["id"]), "url": file_url(r["id"]), "name": r["name"], "mime": r["mime"], "size": r["size"],
+             "width": r["width"], "height": r["height"], "animated": r["animated"], "sticker": True}
+        ]
+    elif body.gif:
+        from .extras2 import GIF_URL  # aqui para não dar ciclo
+
+        url = str(body.gif.get("url") or "")
+        if not GIF_URL.match(url):
+            raise err(400, "GIF inválido.")
+        w, h = body.gif.get("width"), body.gif.get("height")
+        attachments = [
+            {"url": url, "name": str(body.gif.get("title") or "GIF")[:80], "mime": "image/gif", "size": 0,
+             "width": int(w) if isinstance(w, (int, float)) else None, "height": int(h) if isinstance(h, (int, float)) else None,
+             "animated": True, "gif": True}
+        ]
     if not content and not attachments:
         raise err(400, "Mensagem vazia.")
     reply = None

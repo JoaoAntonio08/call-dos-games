@@ -2,6 +2,9 @@ plugins {
     id "com.android.application"
 }
 
+// versão do app: ao mudar, suba também o versionCode e atualize public/apps/versao.json no site
+def VERSAO = "1.2.0"
+
 // A chave fica em android/keystore/ (fora do git). Sem ela não dá para atualizar o app: guarde backup!
 def ks = new Properties()
 def ksFile = rootProject.file("keystore/keystore.properties")
@@ -16,8 +19,10 @@ android {
         applicationId "com.calldosgames.app"
         minSdk 24
         targetSdk 35
-        versionCode 3
-        versionName "1.1.1"
+        versionCode 4
+        versionName VERSAO
+        // o site lê a versão do endereço de abertura para avisar quando tiver uma nova
+        manifestPlaceholders = [versao: VERSAO]
     }
 
     signingConfigs {

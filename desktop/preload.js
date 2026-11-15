@@ -1,4 +1,16 @@
-// Avisa o site que ele está rodando dentro do app de Windows (útil para textos e ajustes futuros).
-const { contextBridge } = require("electron");
+// Avisa o site que ele está rodando dentro do app de Windows, com a versão do app e o botão de atualizar.
+const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("cdgDesktop", { app: "windows", version: process.versions.electron });
+const arg = process.argv.find((a) => a.startsWith("--cdg-version="));
+
+contextBridge.exposeInMainWorld("cdgDesktop", {
+  app: "windows",
+  version: process.versions.electron,
+  appVersion: arg ? arg.slice("--cdg-version=".length) : "",
+  update: (url) => ipcRenderer.invoke("cdg:update", url),
+  onUpdateProgress: (cb) => {
+    const f = (_e, pct) => cb(pct);
+    ipcRenderer.on("cdg:update-progress", f);
+    return () => ipcRenderer.removeListener("cdg:update-progress", f);
+  },
+});

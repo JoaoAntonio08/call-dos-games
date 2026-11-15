@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, Hash, HeadphoneOff, LogOut, MicOff, Plus, Settings, Trophy, TvMinimalPlay, UserPlus, Users, Video, Volume2 } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { isUnread, useStore, useUser, usePresence } from "@/lib/store";
-import { openModal, openProfile, toast, type ServerPage } from "@/lib/ui";
+import { openModal, openProfile, openUserMenu, toast, type ServerPage } from "@/lib/ui";
 import { useVoice } from "@/lib/voice";
 import type { Channel, Dm, Server, VoiceMember } from "@/lib/types";
 import { AnimImg, Avatar, Popover, useAnchor } from "./bits";
+import { canModerate, dragProps, moveToChannel, useDropTarget } from "./user-menu";
 
 /* ------------------------------------------------------------------ */
 /* início: amigos e conversas diretas                                  */
@@ -226,10 +227,13 @@ function TextRow({ server, channel, active, unread }: { server: Server; channel:
 
 function VoiceRow({ server, channel, active }: { server: Server; channel: Channel; active: boolean }) {
   const members = useStore((s) => s.voice[channel.id]) ?? [];
+  const me = useStore((s) => s.me);
   const v = useVoice();
   const here = v.channelId === channel.id;
+  // solte alguém (arrastado da call) aqui para levar para esta sala
+  const drop = useDropTarget((userId) => void moveToChannel(server, userId, channel.id, me?.id, v.join));
   return (
-    <div>
+    <div {...drop.props} className={`rounded-[10px] ${drop.over ? "bg-ember/20 outline-2 outline-dashed outline-ember" : ""}`}>
       <Link
         href={`/app/s/${server.id}/${channel.id}`}
         onDoubleClick={() => void v.join(channel.id)}
@@ -256,20 +260,36 @@ function VoiceRow({ server, channel, active }: { server: Server; channel: Channe
 function VoiceMemberRow({ m, serverId }: { m: VoiceMember; serverId: string }) {
   const user = useUser(m.user_id);
   const v = useVoice();
+  const me = useStore((s) => s.me);
+  const server = useStore((s) => s.servers[serverId]);
+  const game = useStore((s) => s.games[m.user_id]);
   const speaking = v.call.peers.find((p) => p.identity === m.user_id)?.speaking;
   if (!user) return null;
+  // você pode se arrastar para outra sala; admin arrasta os outros
+  const canDrag = m.user_id === me?.id || canModerate(server, me?.id, m.user_id);
   return (
     <li>
       <button
         type="button"
+        {...dragProps(m.user_id, canDrag)}
         onClick={(e) => openProfile(user.id, e.currentTarget, serverId)}
+        onContextMenu={(e) => openUserMenu(e, user.id, serverId)}
+        title={game ? `Jogando ${game.name}` : undefined}
         className="group flex h-8 w-full items-center gap-2 rounded-[8px] px-1.5 text-left text-[13.5px] text-oat/70 hover:bg-cocoa-3 hover:text-oat"
       >
         <Avatar name={user.display_name} avatar={user.avatar} accent={user.accent} size={22} ring={speaking ? "var(--color-moss)" : undefined} />
         <span className="min-w-0 flex-1 truncate">{user.display_name}</span>
         {m.stream && <span className="rounded-[5px] bg-rust px-1 text-[9.5px] font-bold uppercase tracking-wide text-oat">ao vivo</span>}
         {m.video && <Video className="size-3.5 opacity-60" />}
-        {m.deaf ? <HeadphoneOff className="size-3.5 text-rust" aria-label="Sem som" /> : !m.mic && <MicOff className="size-3.5 text-rust" aria-label="Mudo" />}
+        {m.sdeaf ? (
+          <HeadphoneOff className="size-3.5 text-honey" aria-label="Sem som (admin)" />
+        ) : m.smute ? (
+          <MicOff className="size-3.5 text-honey" aria-label="Mutado por um admin" />
+        ) : m.deaf ? (
+          <HeadphoneOff className="size-3.5 text-rust" aria-label="Sem som" />
+        ) : (
+          !m.mic && <MicOff className="size-3.5 text-rust" aria-label="Mudo" />
+        )}
       </button>
     </li>
   );

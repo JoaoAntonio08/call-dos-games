@@ -2,6 +2,7 @@
 
 import { themeBgOf } from "@/lib/badges";
 import { BadgeRow } from "./badges";
+import { SteamCard } from "./integracoes";
 import { useEffect, useState } from "react";
 import { MessageCircle, Pencil, UserCheck, UserPlus } from "lucide-react";
 import { api, errorText } from "@/lib/api";
@@ -95,6 +96,7 @@ export function ProfilePopover() {
             <div className="my-3 h-px bg-oat/[0.08]" />
             <p className="label mb-1 text-oat/40">Na turma desde</p>
             <p className="text-[13.5px] text-oat/80">{sinceOf(u.created_at)}</p>
+            <SteamCard userId={u.id} />
             {full && full.mutual_servers.length > 0 && !isMe && (
               <p className="mt-2 text-[12.5px] text-oat/50">
                 {full.mutual_servers.length === 1 ? "Servidor em comum: " : `${full.mutual_servers.length} servidores em comum: `}

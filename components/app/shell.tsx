@@ -15,6 +15,9 @@ import { HallView } from "./hall";
 import { ShowsView } from "./shows";
 import { MemberList } from "./members";
 import { ProfilePopover } from "./profile";
+import { UserMenu } from "./user-menu";
+import { UpdateBanner } from "./update-banner";
+import { HypeAlert } from "./hype";
 import { Modals } from "./modals";
 
 export function Shell() {
@@ -123,6 +126,7 @@ export function Shell() {
       {navOpen && <div className="fixed inset-0 z-30 bg-cocoa-0/60 md:hidden" onClick={() => useUI.setState({ navOpen: false })} />}
 
       <main className="flex min-w-0 flex-1 flex-col bg-cocoa-3">
+        <UpdateBanner />
         {!connected && (
           <div className="bg-honey/90 px-4 py-1.5 text-center text-[12.5px] font-semibold text-cocoa-0">Reconectando ao servidor da turma…</div>
         )}
@@ -133,6 +137,8 @@ export function Shell() {
       </main>
 
       <ProfilePopover />
+      <UserMenu />
+      <HypeAlert />
       <Modals />
       {toastMsg && (
         <div key={toastMsg.id} role="status" className="slide-in fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">

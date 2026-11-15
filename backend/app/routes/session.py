@@ -52,6 +52,18 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
     user = await fetch_user(me.id)
     assert user
     profile = user_out(user)
+    from .voz import mods_of, publish_sources  # aqui para não dar ciclo
+
+    mods = await mods_of(ch["server_id"], me.id)
+    grant: dict = {
+        "room": f"cdg-{cid}",
+        "roomJoin": True,
+        "canPublish": True,
+        "canSubscribe": not mods["deaf"],
+        "canPublishData": True,
+    }
+    if (src := publish_sources(mods["mute"])) is not None:
+        grant["canPublishSources"] = src
     now = int(time.time())
     claims = {
         "iss": settings.livekit_key,
@@ -68,13 +80,7 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
                 "join_sound": profile["join_sound"],
             }
         ),
-        "video": {
-            "room": f"cdg-{cid}",
-            "roomJoin": True,
-            "canPublish": True,
-            "canSubscribe": True,
-            "canPublishData": True,
-        },
+        "video": grant,
     }
     token = jwt.encode(claims, settings.livekit_secret, algorithm="HS256")
     return {"token": token, "url": settings.livekit_url, "identity": str(me.id)}

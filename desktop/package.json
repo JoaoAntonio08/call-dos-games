@@ -1,7 +1,7 @@
 {
   "name": "call-dos-games-desktop",
   "productName": "Call dos Games",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "App de Windows do Call dos Games",
   "author": "Call dos Games",
   "private": true,

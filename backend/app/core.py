@@ -42,6 +42,9 @@ class Settings:
     # atrás da Cloudflare todo mundo chega com o IP do proxy; o IP real vem neste cabeçalho
     behind_cloudflare = env("BEHIND_CLOUDFLARE", "0") == "1"
     auth_rate_limit = int(env("AUTH_RATE_LIMIT", "20"))
+    # opcionais: busca de GIFs (developers.giphy.com) e "jogando agora" da Steam (steamcommunity.com/dev/apikey)
+    giphy_key = env("GIPHY_API_KEY")
+    steam_key = env("STEAM_API_KEY")
 
 
 settings = Settings()

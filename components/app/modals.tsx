@@ -12,6 +12,7 @@ import { BADGES, MAX_BADGES, nameColorOf, themeBgOf } from "@/lib/badges";
 import { BadgeRow } from "./badges";
 import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
 import { keyName } from "./user-bar";
+import { BotsTab, SteamSettings } from "./integracoes";
 import { Room } from "livekit-client";
 
 export function Modals() {
@@ -343,6 +344,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
       tabs={[
         ["perfil", "Perfil"],
         ["voz", "Voz e vídeo"],
+        ["jogos", "Jogos"],
         ["conta", "Conta"],
       ]}
       footer={
@@ -360,6 +362,12 @@ function UserSettings({ tab: initial }: { tab?: string }) {
     >
       {tab === "perfil" && <ProfileTab goAccount={() => setTab("conta")} />}
       {tab === "voz" && <VoiceTab />}
+      {tab === "jogos" && (
+        <div className="max-w-xl">
+          <H>Jogos</H>
+          <SteamSettings />
+        </div>
+      )}
       {tab === "conta" && <AccountTab />}
     </SettingsFrame>
   );
@@ -774,8 +782,18 @@ function VoiceTab() {
       </Section>
       <Section title="Sons">
         <label className="block text-[14px]">
-          Volume do soundboard e dos sons de entrada
-          <input type="range" className="range mt-2 w-full text-oat" min={0} max={1} step={0.05} value={v.prefs.sfxVolume} style={fill(v.prefs.sfxVolume)} onChange={(e) => set({ sfxVolume: Number(e.target.value) })} />
+          <span className="flex justify-between">
+            Efeitos sonoros (soundboard)
+            <span className="tabular-nums text-oat/50">{Math.round(v.prefs.sfxVolume * 100)}%</span>
+          </span>
+          <input type="range" className="range mt-2 w-full text-oat" min={0} max={1} step={0.05} value={v.prefs.sfxVolume} style={fill(v.prefs.sfxVolume)} onChange={(e) => set({ sfxVolume: Number(e.target.value) })} aria-label="Volume dos efeitos sonoros" />
+        </label>
+        <label className="mt-4 block text-[14px]">
+          <span className="flex justify-between">
+            Entrada e saída da call
+            <span className="tabular-nums text-oat/50">{Math.round(v.prefs.joinVolume * 100)}%</span>
+          </span>
+          <input type="range" className="range mt-2 w-full text-oat" min={0} max={1} step={0.05} value={v.prefs.joinVolume} style={fill(v.prefs.joinVolume)} onChange={(e) => set({ joinVolume: Number(e.target.value) })} aria-label="Volume de entrada e saída da call" />
         </label>
         <label className="mt-3 flex items-center justify-between gap-4 py-1">
           <span className="text-[14.5px] font-medium">Tocar o som de entrada personalizado de cada um</span>
@@ -842,6 +860,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
       ? ([
           ["canais", "Canais"],
           ["membros", "Membros"],
+          ["bots", "Bots"],
         ] as [string, string][])
       : []),
   ];
@@ -853,6 +872,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
       {tab === "emojis" && <EmojisTab server={server} admin={admin} />}
       {tab === "canais" && <ChannelsTab server={server} />}
       {tab === "membros" && <MembersTab server={server} owner={role === "owner"} />}
+      {tab === "bots" && <BotsTab server={server} />}
     </SettingsFrame>
   );
 }

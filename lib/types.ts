@@ -24,6 +24,8 @@ export interface User {
   /** tema do cartão: [cima, baixo] ou [] */
   theme: string[];
   badges: string[];
+  /** mensagem de webhook (bot) */
+  bot?: boolean;
 }
 
 export interface Me extends User {
@@ -97,7 +99,10 @@ export interface Dm {
 }
 
 export interface Attachment {
-  id: string;
+  /** GIF da busca não tem id: vem direto do GIPHY */
+  id?: string;
+  sticker?: boolean;
+  gif?: boolean;
   url: string;
   name: string;
   mime: string;
@@ -118,7 +123,7 @@ export interface Message {
   channel_id: string;
   author: User | null;
   content: string;
-  kind: "default" | "join" | "system" | "hall";
+  kind: "default" | "join" | "system" | "hall" | "hype";
   attachments: Attachment[];
   reply_to: { id: string; author_id: string | null; author_name: string; content: string; has_attachments: boolean } | null;
   reply_missing: boolean;
@@ -137,6 +142,43 @@ export interface VoiceMember {
   video: boolean;
   stream: boolean;
   since: number;
+  /** mutado / sem som por um admin, para todos */
+  smute?: boolean;
+  sdeaf?: boolean;
+  /** volume da pessoa para todos (0..1), escolhido por um admin */
+  gain?: number;
+}
+
+export interface Game {
+  name: string;
+  appid: string;
+}
+
+export interface Sticker {
+  id: string;
+  name: string;
+  file_id: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+  animated: boolean;
+}
+
+export interface Gif {
+  id: string;
+  title: string;
+  url: string;
+  preview: string;
+  width: number;
+  height: number;
+}
+
+export interface SteamProfile {
+  name: string;
+  url: string;
+  public: boolean;
+  playing: Game | null;
+  recent: { appid: string; name: string; hours_2weeks: number; hours_total: number; image: string }[];
 }
 
 export interface Bootstrap {

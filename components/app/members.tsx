@@ -1,15 +1,16 @@
 "use client";
 
 import { nameColorOf } from "@/lib/badges";
-import { Crown, Shield } from "lucide-react";
+import { Crown, Gamepad2, Shield } from "lucide-react";
 import { useStore } from "@/lib/store";
-import { openProfile } from "@/lib/ui";
+import { openProfile, openUserMenu } from "@/lib/ui";
 import type { Member, Server } from "@/lib/types";
 import { Avatar } from "./bits";
 
 export function MemberList({ server }: { server: Server }) {
   const presence = useStore((s) => s.presence);
   const users = useStore((s) => s.users);
+  const games = useStore((s) => s.games);
   const status = (m: Member) => presence[m.user.id]?.status ?? m.user.status;
   const online = server.members.filter((m) => status(m) !== "offline");
   const offline = server.members.filter((m) => status(m) === "offline");
@@ -34,6 +35,7 @@ export function MemberList({ server }: { server: Server }) {
                   key={m.user.id}
                   type="button"
                   onClick={(e) => openProfile(u.id, e.currentTarget, server.id)}
+                  onContextMenu={(e) => openUserMenu(e, u.id, server.id)}
                   className={`group flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left hover:bg-cocoa-3 ${st === "offline" ? "opacity-45 hover:opacity-100" : ""}`}
                 >
                   <Avatar name={u.display_name} avatar={u.avatar} accent={u.accent} size={34} status={st} />
@@ -45,7 +47,14 @@ export function MemberList({ server }: { server: Server }) {
                       {m.role === "owner" && <Crown className="size-3.5 shrink-0 text-honey" aria-label="Dono" />}
                       {m.role === "admin" && <Shield className="size-3.5 shrink-0 text-oat/50" aria-label="Admin" />}
                     </span>
-                    {custom && st !== "offline" && <span className="block truncate text-[12px] text-oat/45">{custom}</span>}
+                    {games[u.id] && st !== "offline" ? (
+                      <span className="flex items-center gap-1 truncate text-[12px] text-moss">
+                        <Gamepad2 className="size-3.5 shrink-0" />
+                        <span className="truncate">Jogando {games[u.id].name}</span>
+                      </span>
+                    ) : (
+                      custom && st !== "offline" && <span className="block truncate text-[12px] text-oat/45">{custom}</span>
+                    )}
                   </span>
                 </button>
               );

@@ -214,3 +214,38 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS badges TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS welcome_lines TEXT[] NOT NULL DEFAULT '{}';
+
+-- moderação de voz (2026-11): admin muta/ensurdece para todos e ajusta o volume de alguém para todos
+CREATE TABLE IF NOT EXISTS voice_mods (
+    server_id  BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mute       BOOLEAN NOT NULL DEFAULT false,
+    deaf       BOOLEAN NOT NULL DEFAULT false,
+    gain       REAL NOT NULL DEFAULT 1,
+    PRIMARY KEY (server_id, user_id)
+);
+
+-- figurinhas próprias (coleção de cada pessoa)
+CREATE TABLE IF NOT EXISTS stickers (
+    id          BIGINT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL DEFAULT '',
+    file_id     BIGINT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS stickers_user_file ON stickers (user_id, file_id);
+
+-- Steam: o que a pessoa está jogando
+ALTER TABLE users ADD COLUMN IF NOT EXISTS steam_id TEXT NOT NULL DEFAULT '';
+
+-- webhooks: bots e serviços de fora mandam mensagem num canal
+CREATE TABLE IF NOT EXISTS webhooks (
+    id          BIGINT PRIMARY KEY,
+    channel_id  BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    token_hash  TEXT NOT NULL,
+    created_by  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS webhook_id BIGINT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_name TEXT NOT NULL DEFAULT '';

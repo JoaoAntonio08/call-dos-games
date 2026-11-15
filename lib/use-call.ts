@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AudioPresets,
   ConnectionState,
+  DisconnectReason,
   LocalAudioTrack,
   LocalTrack,
   Room,
@@ -161,6 +162,8 @@ export function useCall() {
   const [canPlayAudio, setCanPlayAudio] = useState(true);
   const [sharing, setSharing] = useState<ShareSettings | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
+  /** por que a última call acabou sem você clicar em sair */
+  const [endReason, setEndReason] = useState<"elsewhere" | "removed" | null>(null);
 
   const refresh = useCallback(() => {
     const r = roomRef.current;
@@ -201,6 +204,7 @@ export function useCall() {
       onPeerLeave?: (name: string) => void;
     }) => {
       if (roomRef.current) return false;
+      setEndReason(null);
       setStatus("connecting");
       setError("");
       try {
@@ -244,9 +248,20 @@ export function useCall() {
           if (s === ConnectionState.Reconnecting || s === ConnectionState.SignalReconnecting) setStatus("reconnecting");
           else if (s === ConnectionState.Connected) setStatus("connected");
         });
-        r.on(RoomEvent.Disconnected, () => {
+        r.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
           screenTracks.current = [];
           setSharing(null);
+          // solta a sala: sem isso, depois de cair (ex.: entrou pelo celular) não dava para entrar de novo sem reiniciar
+          if (roomRef.current === r) {
+            roomRef.current = null;
+            setRoom(null);
+            setPeers([]);
+          }
+          if (reason === DisconnectReason.DUPLICATE_IDENTITY) {
+            setEndReason("elsewhere");
+          } else if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
+            setEndReason("removed");
+          }
           setStatus((st) => (st === "error" ? st : "disconnected"));
         });
 
@@ -447,6 +462,7 @@ export function useCall() {
   return {
     room,
     status,
+    endReason,
     error,
     notice,
     flash,

@@ -151,7 +151,14 @@ O botão do Google aparece sozinho quando o ID está preenchido. A "chave secret
 
 Sem configurar, o link de redefinir aparece em `journalctl -u calldosgames-api`, e dá para mandar para o amigo na mão. Para enviar por e-mail, crie uma conta grátis em <https://resend.com>, verifique o domínio e preencha `RESEND_API_KEY` e `EMAIL_FROM`.
 
-## 11. Backup
+## 11. GIFs e Steam (opcional)
+
+- **GIFs no chat:** crie uma conta em <https://developers.giphy.com>, clique em **Create an API Key** (tipo *API*), e coloque a chave em `GIPHY_API_KEY`.
+- **Steam ("jogando agora" e jogos recentes):** entre na Steam e pegue a chave em <https://steamcommunity.com/dev/apikey> (no domínio pode colocar o do site). Coloque em `STEAM_API_KEY`.
+
+Depois: `sudo systemctl restart calldosgames-api`. Sem as chaves, o resto funciona e o app só avisa que essas partes estão desligadas. Cada pessoa liga a própria Steam em **Configurações → Jogos**, colando o link do perfil (o perfil e os detalhes de jogo precisam estar públicos na Steam).
+
+## 12. Backup
 
 ```bash
 sudo -u calldosgames crontab -e
@@ -170,6 +177,8 @@ sudo bash /opt/calldosgames/app/backend/scripts/atualizar.sh
 ```
 
 Ele baixa a versão nova, instala o que mudou, refaz o build do site e reinicia a API e o site. Os `.env`, o banco e os arquivos enviados não são tocados.
+
+O arquivo `public/apps/versao.json` diz qual é a versão mais nova dos apps de Windows e Android. Os apps leem esse arquivo no site e avisam a turma quando sai versão nova (no Windows, o app baixa e instala sozinho). Então, depois de publicar uma versão nova dos apps no GitHub, é só rodar o `atualizar.sh` que o aviso aparece para todo mundo.
 
 ## Trazer os dados do PC (opcional)
 

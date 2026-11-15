@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { api, ApiError, GATEWAY_URL, getToken, setToken } from "./api";
-import type { Bootstrap, Dm, Friend, HallEntry, Me, Message, Presence, QueueItem, Server, Show, User, VoiceMember } from "./types";
+import type { Bootstrap, Dm, Friend, Game, HallEntry, Me, Message, Presence, QueueItem, Server, Show, User, VoiceMember } from "./types";
 
 interface ChannelMessages {
   items: Message[];
@@ -16,6 +16,10 @@ interface State {
   connected: boolean;
   livekit: boolean;
   livekitCloud: boolean;
+  /** o que está ligado no servidor da turma (precisa de chave): GIFs e Steam */
+  features: { gifs: boolean; steam: boolean };
+  /** o que cada um está jogando agora (Steam) */
+  games: Record<string, Game>;
   me: Me | null;
   servers: Record<string, Server>;
   serverOrder: string[];
@@ -41,6 +45,8 @@ export const useStore = create<State>(() => ({
   connected: false,
   livekit: false,
   livekitCloud: false,
+  features: { gifs: false, steam: false },
+  games: {},
   me: null,
   servers: {},
   serverOrder: [],
@@ -155,6 +161,9 @@ export async function bootstrap() {
       voice: b.voice,
     });
     gateway.connect();
+    api<State["features"]>("/features")
+      .then((features) => set({ features }))
+      .catch(() => {});
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
       setToken(null);
@@ -280,7 +289,7 @@ class Gateway {
         if (t === "hello") {
           this.retry = 0;
           const first = !get().connected;
-          set({ connected: true, ...(d?.voice ? { voice: d.voice } : {}) });
+          set({ connected: true, ...(d?.voice ? { voice: d.voice } : {}), ...(d?.games ? { games: d.games } : {}) });
           window.clearInterval(this.pinger);
           this.pinger = window.setInterval(() => this.send({ op: "ping" }), 30_000);
           // depois de cair, recarrega tudo para não perder nada que aconteceu offline
@@ -494,6 +503,20 @@ function handleEvent(t: string, d: any) {
     case "voice_state":
       set((s) => ({ voice: { ...s.voice, [d.channel_id]: d.members } }));
       window.dispatchEvent(new CustomEvent("cdg:voice", { detail: d }));
+      break;
+    case "game":
+      set((s) => {
+        const games = { ...s.games };
+        if (d.game) games[d.user_id] = d.game;
+        else delete games[d.user_id];
+        return { games };
+      });
+      break;
+    // um admin mexeu em você na call, ou alguém chamou a turma: quem cuida é a call e o shell
+    case "voice_move":
+    case "voice_kick":
+    case "hype":
+      window.dispatchEvent(new CustomEvent(`cdg:${t.replace("_", "-")}`, { detail: d }));
       break;
   }
 }

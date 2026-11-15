@@ -1,6 +1,7 @@
 // App de Windows do Call dos Games: uma janela própria que abre o site publicado.
 // Como o conteúdo vem do site, o app se atualiza sozinho sempre que o site é republicado.
-const { app, BrowserWindow, Menu, desktopCapturer, ipcMain, session, shell, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, desktopCapturer, ipcMain, net, session, shell, clipboard } = require("electron");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -71,6 +72,8 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       spellcheck: true,
+      // a versão do app vai para o site, que avisa quando tiver uma nova
+      additionalArguments: [`--cdg-version=${app.getVersion()}`],
     },
   });
   if (s.maximized) win.maximize();
@@ -214,6 +217,48 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+});
+
+/* ------------------------------------------------------------------ atualização */
+// Só baixa instalador das versões publicadas do projeto no GitHub.
+const RELEASES = "https://github.com/JoaoAntonio08/call-dos-games/releases/download/";
+let updating = false;
+
+ipcMain.handle("cdg:update", async (e, url) => {
+  if (!isApp(e.senderFrame?.url || "")) throw new Error("origem");
+  if (typeof url !== "string" || !url.startsWith(RELEASES) || !url.endsWith(".exe")) throw new Error("Endereço de atualização inválido.");
+  if (updating) return "baixando";
+  updating = true;
+  try {
+    const res = await net.fetch(url, { redirect: "follow" });
+    if (!res.ok || !res.body) throw new Error(`download falhou (${res.status})`);
+    const total = Number(res.headers.get("content-length")) || 0;
+    const file = path.join(app.getPath("temp"), path.basename(new URL(url).pathname));
+    const out = fs.createWriteStream(file);
+    let got = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      got += value.length;
+      if (!out.write(Buffer.from(value))) await new Promise((r) => out.once("drain", r));
+      if (total) {
+        const pct = got / total;
+        win?.setProgressBar(pct);
+        e.sender.send("cdg:update-progress", pct);
+      }
+    }
+    await new Promise((r, j) => out.end((err) => (err ? j(err) : r())));
+    win?.setProgressBar(-1);
+    // instala por cima sem perguntar nada e abre o app de novo no fim
+    spawn(file, ["/S", "--force-run"], { detached: true, stdio: "ignore" }).unref();
+    setTimeout(() => app.quit(), 400);
+    return "instalando";
+  } catch (err) {
+    updating = false;
+    win?.setProgressBar(-1);
+    throw err;
+  }
 });
 
 app.on("window-all-closed", () => app.quit());

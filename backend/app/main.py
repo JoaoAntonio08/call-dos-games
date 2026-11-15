@@ -6,6 +6,7 @@ No servidor:   uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -25,12 +26,17 @@ from .routes.messages import router as messages_router
 from .routes.servers import router as servers_router
 from .routes.session import router as session_router
 from .routes.users import router as users_router
+from .routes.voz import router as voz_router
+from .routes.extras2 import router as extras2_router, steam_loop
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await connect_db()
+    loop = asyncio.create_task(steam_loop()) if settings.steam_key else None
     yield
+    if loop:
+        loop.cancel()
     await close_db()
 
 
@@ -82,5 +88,5 @@ async def health() -> dict:
     return {"ok": True}
 
 
-for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router):
+for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router):
     app.include_router(r)

@@ -3,7 +3,7 @@
 import { nameColorOf } from "@/lib/badges";
 import Link from "next/link";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FileText, Hash, MessageSquare, Pencil, Phone, PhoneOff, Plus, Reply, SmilePlus, Trash2, Users, X } from "lucide-react";
+import { FileText, Hash, MessageSquare, Pencil, Phone, PhoneOff, Plus, Reply, SmilePlus, Sticker as StickerIcon, Trash2, Users, X } from "lucide-react";
 import { api, errorText, upload } from "@/lib/api";
 import { idGt, loadMessages, markRead, sendMessage, sendTyping, useStore, useUser, usePresence } from "@/lib/store";
 import { openProfile, toast, useUI } from "@/lib/ui";
@@ -13,6 +13,8 @@ import type { Attachment, Channel, CustomEmoji, Dm, Member, Message, Server, Use
 import { useTicker } from "@/components/room/media";
 import { Avatar, Popover, useAnchor } from "./bits";
 import { EmojiPicker, QUICK_REACTIONS } from "./emoji-picker";
+import { HypeLine } from "./hype";
+import { GifView, StickerPicker, StickerView } from "./stickers";
 import { RichText, isJumbo } from "./rich-text";
 import { CallStage } from "./voice-view";
 
@@ -304,6 +306,8 @@ const MessageItem = memo(function MessageItem({
     [members, serverId],
   );
 
+  if (msg.kind === "hype") return <HypeLine channelId={msg.content} name={name} stamp={stampOf(msg.created_at)} serverId={serverId} />;
+
   if (msg.kind === "join") {
     const custom = welcome?.length ? welcome : null;
     const pick = Number(BigInt(msg.id) % BigInt(custom ? custom.length : JOIN_LINES.length));
@@ -395,7 +399,7 @@ const MessageItem = memo(function MessageItem({
             <span className="block pt-1 text-right text-[10.5px] tabular-nums text-oat/0 group-hover:text-oat/35">{timeOf(msg.created_at)}</span>
           ) : (
             author && (
-              <button type="button" onClick={(e) => openProfile(author.id, e.currentTarget, serverId)} className="press mt-0.5 block rounded-full" aria-label={`Perfil de ${name}`}>
+              <button type="button" onClick={(e) => !author.bot && openProfile(author.id, e.currentTarget, serverId)} className="press mt-0.5 block rounded-full" aria-label={`Perfil de ${name}`}>
                 <Avatar name={author.display_name} avatar={author.avatar} accent={author.accent} size={40} />
               </button>
             )
@@ -406,12 +410,13 @@ const MessageItem = memo(function MessageItem({
             <p className="flex items-baseline gap-2">
               <button
                 type="button"
-                onClick={(e) => author && openProfile(author.id, e.currentTarget, serverId)}
+                onClick={(e) => author && !author.bot && openProfile(author.id, e.currentTarget, serverId)}
                 className="truncate text-[15px] font-semibold hover:underline"
                 style={{ color: nameColorOf(author) }}
               >
                 {name}
               </button>
+              {author?.bot && <span className="shrink-0 self-center rounded-[5px] bg-ember px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white">Bot</span>}
               <span className="shrink-0 text-[11.5px] text-oat/35">{stampOf(msg.created_at)}</span>
             </p>
           )}
@@ -428,7 +433,7 @@ const MessageItem = memo(function MessageItem({
           {msg.attachments.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-2">
               {msg.attachments.map((a) => (
-                <AttachmentView key={a.id} a={a} />
+                <AttachmentView key={a.id ?? a.url} a={a} mine={mine} />
               ))}
             </div>
           )}
@@ -546,8 +551,10 @@ function EditBox({ msg, onDone }: { msg: Message; onDone: () => void }) {
   );
 }
 
-export function AttachmentView({ a }: { a: Attachment }) {
+export function AttachmentView({ a, mine }: { a: Attachment; mine?: boolean }) {
   const [big, setBig] = useState(false);
+  if (a.sticker) return <StickerView a={a} mine={!!mine} />;
+  if (a.gif) return <GifView a={a} />;
   if (a.mime.startsWith("image/")) {
     const w = a.width ?? 400;
     const h = a.height ?? 300;
@@ -619,6 +626,7 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
   const [busy, setBusy] = useState(false);
   const [mention, setMention] = useState<{ q: string; index: number } | null>(null);
   const picker = useAnchor<HTMLButtonElement>();
+  const stickers = useAnchor<HTMLButtonElement>();
   const fileInput = useRef<HTMLInputElement>(null);
   const area = useRef<HTMLDivElement>(null);
   const typing = useStore((s) => s.typing[channelId]);
@@ -665,6 +673,16 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
       setFiles((cur) => [...cur, { file: f, preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null }]);
     }
   };
+
+  async function sendSpecial(body: { sticker_id: string } | { gif: { url: string; width: number; height: number; title: string } }) {
+    stickers.close();
+    try {
+      await api(`/channels/${channelId}/messages`, { json: { ...body, reply_to: replyTo?.id } });
+      setReplyTo(null);
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
 
   async function send() {
     const content = text.trim();
@@ -804,6 +822,15 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
             }}
             className="max-h-[260px] min-h-[38px] flex-1 bg-transparent py-2 text-[15px] leading-[1.4] outline-none placeholder:text-oat/30"
           />
+          <button
+            type="button"
+            onClick={(e) => stickers.open(e.currentTarget)}
+            aria-label="Figurinhas e GIFs"
+            title="Figurinhas e GIFs"
+            className="press mb-0.5 grid size-9 shrink-0 place-items-center rounded-full text-oat/55 hover:bg-cocoa-5 hover:text-oat"
+          >
+            <StickerIcon className="size-5" />
+          </button>
           <button type="button" onClick={(e) => picker.open(e.currentTarget)} aria-label="Emoji" className="press mb-0.5 grid size-9 shrink-0 place-items-center rounded-full text-oat/55 hover:bg-cocoa-5 hover:text-oat">
             <SmilePlus className="size-5" />
           </button>
@@ -822,6 +849,12 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
           </span>
         )}
       </div>
+      <Popover anchor={stickers.rect} onClose={stickers.close} side="top">
+        <StickerPicker
+          onSticker={(s) => void sendSpecial({ sticker_id: s.id })}
+          onGif={(g) => void sendSpecial({ gif: { url: g.url, width: g.width, height: g.height, title: g.title } })}
+        />
+      </Popover>
       <Popover anchor={picker.rect} onClose={picker.close} side="top">
         <EmojiPicker
           emojis={server?.emojis}

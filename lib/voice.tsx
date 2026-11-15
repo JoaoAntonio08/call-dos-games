@@ -19,18 +19,24 @@ export interface VoicePrefs {
   ptt: boolean;
   pttKey: string; // KeyboardEvent.code
   noiseSuppression: boolean;
+  /** soundboard e efeitos */
   sfxVolume: number;
+  /** sons de entrada/saída da call (separado dos efeitos) */
+  joinVolume: number;
   joinSounds: boolean;
   startMuted: boolean;
   /** guarda os últimos ~40 s da tela compartilhada para clipar */
   clipBuffer: boolean;
 }
 
-const DEFAULT_PREFS: VoicePrefs = { ptt: false, pttKey: "KeyV", noiseSuppression: true, sfxVolume: 0.7, joinSounds: true, startMuted: false, clipBuffer: true };
+const DEFAULT_PREFS: VoicePrefs = { ptt: false, pttKey: "KeyV", noiseSuppression: true, sfxVolume: 0.7, joinVolume: 0.7, joinSounds: true, startMuted: false, clipBuffer: true };
 
 function loadPrefs(): VoicePrefs {
   try {
-    return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem("cdg:voice") || "{}") };
+    const saved = JSON.parse(localStorage.getItem("cdg:voice") || "{}");
+    // antes era um volume só para tudo: quem já tinha ajustado continua com o mesmo valor nos dois
+    if (saved.joinVolume === undefined && typeof saved.sfxVolume === "number") saved.joinVolume = saved.sfxVolume;
+    return { ...DEFAULT_PREFS, ...saved };
   } catch {
     return DEFAULT_PREFS;
   }
@@ -116,6 +122,12 @@ interface VoiceCtx {
   pttDown: boolean;
   voiceVol: Record<string, number>;
   screenVol: Record<string, number>;
+  /** silenciados só para mim */
+  localMute: Record<string, boolean>;
+  setLocalMute: (id: string, v: boolean) => void;
+  /** um admin te mutou / tirou seu som para todos */
+  serverMute: boolean;
+  serverDeaf: boolean;
   strokes: Stroke[];
   spin: Spin | null;
   reactions: FloatingReaction[];
@@ -159,6 +171,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [pttDown, setPttDown] = useState(false);
   const [voiceVol, setVV] = useState<Record<string, number>>({});
   const [screenVol, setSV] = useState<Record<string, number>>({});
+  const [localMute, setLM] = useState<Record<string, boolean>>({});
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [spin, setSpin] = useState<Spin | null>(null);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
@@ -173,6 +186,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     setPrefsState(loadPrefs());
     try {
       setVV(JSON.parse(localStorage.getItem("cdg:vol") || "{}"));
+      setLM(JSON.parse(localStorage.getItem("cdg:mudos") || "{}"));
     } catch {
       /* nada salvo */
     }
@@ -202,6 +216,19 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
   const setScreenVol = useCallback((id: string, v: number) => setSV((m) => ({ ...m, [id]: v })), []);
+  const setLocalMute = useCallback((id: string, v: boolean) => {
+    setLM((m) => {
+      const next = { ...m };
+      if (v) next[id] = true;
+      else delete next[id];
+      try {
+        localStorage.setItem("cdg:mudos", JSON.stringify(next));
+      } catch {
+        /* sem armazenamento */
+      }
+      return next;
+    });
+  }, []);
 
   /* ---------------- estado de voz para o servidor (quem está em cada canal) ---------------- */
   const local = call.peers.find((p) => p.isLocal);
@@ -223,7 +250,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------------- entrar / sair ---------------- */
   const leave = useCallback(async () => {
-    if (channelId) chime("leave", prefsRef.current.sfxVolume);
+    if (channelId) chime("leave", prefsRef.current.joinVolume);
     await call.leave();
     gateway.send({ op: "voice", channel_id: null });
     setChannelId(null);
@@ -248,18 +275,18 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         noiseSuppression: p.noiseSuppression,
         onPeerJoin: (_name: string, meta: PeerMeta) => {
           if (deafRef.current) return;
-          if (prefsRef.current.joinSounds && meta.join_sound) playUrl(meta.join_sound, prefsRef.current.sfxVolume);
-          else chime("join", prefsRef.current.sfxVolume);
+          if (prefsRef.current.joinSounds && meta.join_sound) playUrl(meta.join_sound, prefsRef.current.joinVolume);
+          else chime("join", prefsRef.current.joinVolume);
         },
-        onPeerLeave: () => !deafRef.current && chime("leave", prefsRef.current.sfxVolume),
+        onPeerLeave: () => !deafRef.current && chime("leave", prefsRef.current.joinVolume),
       });
       setJoining(null);
       if (!ok) return;
       setChannelId(cid);
       // seu próprio som de entrada, para você saber que entrou
       const mine = useStore.getState().me?.join_sound;
-      if (p.joinSounds && mine) playUrl(mine, p.sfxVolume);
-      else chime("self", p.sfxVolume);
+      if (p.joinSounds && mine) playUrl(mine, p.joinVolume);
+      else chime("self", p.joinVolume);
     },
     [call, channelId, joining],
   );
@@ -268,10 +295,69 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if ((call.status === "error" || call.status === "disconnected") && channelId) {
       setChannelId(null);
-      gateway.send({ op: "voice", channel_id: null });
+      setStrokes([]);
+      setSpin(null);
+      // saiu porque entrou em outro aparelho: o outro já avisou o servidor, não apaga a presença dele
+      if (call.endReason !== "elsewhere") gateway.send({ op: "voice", channel_id: null });
     }
     if (call.status === "error") setJoining(null);
-  }, [call.status, channelId]);
+  }, [call.status, call.endReason, channelId]);
+
+  // a call foi para outro aparelho seu (ex.: entrou pelo celular): avisa em qualquer tela
+  useEffect(() => {
+    if (call.endReason === "elsewhere") toast("Você entrou nessa call em outro aparelho, então saiu por aqui.");
+  }, [call.endReason]);
+
+  /* ---------------- o que um admin decidiu para você ---------------- */
+  const here = useStore((s) => (channelId ? s.voice[channelId] : undefined));
+  const myState = here?.find((m) => m.user_id === me?.id);
+  const serverMute = !!myState?.smute;
+  const serverDeaf = !!myState?.sdeaf;
+  const serverMuteRef = useRef(serverMute);
+  useEffect(() => {
+    serverMuteRef.current = serverMute;
+  }, [serverMute]);
+  useEffect(() => {
+    if (!serverMute || !channelId) return;
+    void call.setMic(false);
+    toast("Um admin mutou você para todos.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverMute, channelId]);
+  useEffect(() => {
+    if (serverMute && local?.micOn) void call.setMic(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverMute, local?.micOn]);
+  useEffect(() => {
+    if (serverDeaf && channelId) toast("Um admin tirou o som da call para você.");
+  }, [serverDeaf, channelId]);
+  /** volume de alguém escolhido por um admin, para todos (0..1) */
+  const gainOf = useCallback((id: string) => here?.find((m) => m.user_id === id)?.gain ?? 1, [here]);
+
+  // admin te moveu de sala ou te tirou da call
+  const joinRef = useRef(join);
+  const leaveRef = useRef(leave);
+  useEffect(() => {
+    joinRef.current = join;
+    leaveRef.current = leave;
+  }, [join, leave]);
+  useEffect(() => {
+    const onMove = (e: Event) => {
+      const d = (e as CustomEvent).detail as { channel_id: string; channel_name: string; by: string };
+      toast(d.by + " levou você para " + d.channel_name + ".");
+      void joinRef.current(d.channel_id);
+    };
+    const onKick = (e: Event) => {
+      const d = (e as CustomEvent).detail as { by: string };
+      toast(d.by + " tirou você da call.");
+      void leaveRef.current();
+    };
+    window.addEventListener("cdg:voice-move", onMove);
+    window.addEventListener("cdg:voice-kick", onKick);
+    return () => {
+      window.removeEventListener("cdg:voice-move", onMove);
+      window.removeEventListener("cdg:voice-kick", onKick);
+    };
+  }, []);
 
   /* ---------------- ensurdecer: corta o mic junto, como no Discord ---------------- */
   const micBeforeDeaf = useRef(true);
@@ -295,7 +381,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
     };
     const down = (e: KeyboardEvent) => {
-      if (e.code !== prefs.pttKey || e.repeat || typing(e) || deafRef.current) return;
+      if (e.code !== prefs.pttKey || e.repeat || typing(e) || deafRef.current || serverMuteRef.current) return;
       setPttDown(true);
       void call.setMic(true);
     };
@@ -501,6 +587,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       pttDown,
       voiceVol,
       screenVol,
+      localMute,
+      setLocalMute,
+      serverMute,
+      serverDeaf,
       strokes,
       spin,
       reactions,
@@ -519,7 +609,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       playQueued,
       clip,
     }),
-    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, clip],
+    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, clip],
   );
 
   return (
@@ -531,8 +621,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           .filter((p) => !p.isLocal)
           .map((p) => (
             <span key={p.identity}>
-              {p.mic && <TrackAudio track={p.mic} volume={deaf ? 0 : (voiceVol[p.identity] ?? 1)} />}
-              {p.screenAudio && <TrackAudio track={p.screenAudio} volume={deaf ? 0 : (screenVol[p.identity] ?? 1)} />}
+              {p.mic && (
+                <TrackAudio track={p.mic} volume={deaf || serverDeaf || localMute[p.identity] ? 0 : (voiceVol[p.identity] ?? 1) * gainOf(p.identity)} />
+              )}
+              {p.screenAudio && <TrackAudio track={p.screenAudio} volume={deaf || serverDeaf ? 0 : (screenVol[p.identity] ?? 1)} />}
             </span>
           ))}
       </div>

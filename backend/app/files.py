@@ -21,10 +21,11 @@ LIMITS = {
     "banner": 15 * MB,
     "icon": 10 * MB,
     "emoji": 1 * MB,
+    "sticker": 3 * MB,
     "sound": 2 * MB,
     "attachment": 25 * MB,
 }
-IMAGE_KINDS = {"avatar", "banner", "icon", "emoji"}
+IMAGE_KINDS = {"avatar", "banner", "icon", "emoji", "sticker"}
 IMAGE_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "GIF": "image/gif", "WEBP": "image/webp"}
 AUDIO_TYPES = {
     ".mp3": "audio/mpeg",

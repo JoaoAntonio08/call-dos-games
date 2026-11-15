@@ -25,9 +25,10 @@ import {
   Video,
   VideoOff,
   Volume2,
+  VolumeX,
 } from "lucide-react";
 import { isUnread, useStore, useUser } from "@/lib/store";
-import { openModal, toggleUI, useUI } from "@/lib/ui";
+import { openModal, openUserMenu, toggleUI, useUI } from "@/lib/ui";
 import { useVoice, type Spin, type Stroke } from "@/lib/voice";
 import { DEFAULT_SHARE, RESOLUTIONS, type Peer, type ShareSettings } from "@/lib/use-call";
 import { loadJSON, saveJSON } from "@/lib/prefs";
@@ -40,6 +41,7 @@ import { DevicesPanel, SharePanel } from "@/components/room/panels";
 import { Avatar } from "./bits";
 import { QueuePanel } from "./queue-panel";
 import { CallChat } from "./chat";
+import { HypeButton } from "./hype";
 
 /* ------------------------------------------------------------------ */
 /* página de um canal de voz                                           */
@@ -73,6 +75,7 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
         <h1 className="font-semibold">{channel.name}</h1>
         {here && <span className="live-dot ml-1 !bg-moss" />}
         <div className="ml-auto flex items-center gap-1">
+          <HypeButton channelId={channel.id} compact />
           <button
             type="button"
             onClick={() => toggleUI("callChat")}
@@ -308,7 +311,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
               }
             >
               {call.peers.map((p) => (
-                <Tile key={p.identity} peer={p} compact />
+                <Tile key={p.identity} peer={p} compact serverId={server?.id} />
               ))}
             </aside>
           </>
@@ -316,18 +319,21 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
           <div className="grid min-h-0 flex-1 place-items-center">
             <div className="grid w-full gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, maxWidth: `min(100%, calc((100svh - 220px) / ${rows} * 16 / 9 * ${cols}))` }}>
               {call.peers.map((p) => (
-                <Tile key={p.identity} peer={p} />
+                <Tile key={p.identity} peer={p} serverId={server?.id} />
               ))}
             </div>
             {n === 1 && !compact && (
-              <p className="mt-6 max-w-sm text-center text-[14px] text-oat/45">
-                Só você por enquanto.{" "}
-                {server && (
-                  <button type="button" onClick={() => openModal({ kind: "invite", serverId: server.id })} className="font-semibold text-ember-2 hover:underline">
-                    Chamar a turma
-                  </button>
+              <div className="mt-6 flex max-w-sm flex-col items-center gap-3 text-center text-[14px] text-oat/45">
+                <p>Só você por enquanto.</p>
+                {server && v.channelId && (
+                  <>
+                    <HypeButton channelId={v.channelId} />
+                    <button type="button" onClick={() => openModal({ kind: "invite", serverId: server.id })} className="text-[13px] font-semibold text-ember-2 hover:underline">
+                      Convidar alguém novo para o servidor
+                    </button>
+                  </>
                 )}
-              </p>
+              </div>
             )}
           </div>
         )}
@@ -509,15 +515,17 @@ function PipButton() {
 /* quadradinho de cada pessoa                                          */
 /* ------------------------------------------------------------------ */
 
-function Tile({ peer, compact }: { peer: Peer; compact?: boolean }) {
+function Tile({ peer, compact, serverId }: { peer: Peer; compact?: boolean; serverId?: string }) {
   const v = useVoice();
   const user = useUser(peer.identity);
   const name = user?.display_name ?? peer.name;
   const avatar = user?.avatar ?? peer.meta.avatar ?? null;
   const accent = user?.accent ?? peer.meta.accent ?? "#5865f2";
   const vol = v.voiceVol[peer.identity] ?? 1;
+  const state = useStore((s) => (v.channelId ? s.voice[v.channelId]?.find((m) => m.user_id === peer.identity) : undefined));
   return (
     <div
+      onContextMenu={(e) => openUserMenu(e, peer.identity, serverId)}
       className={`group relative aspect-video overflow-hidden rounded-[16px] transition-shadow ${peer.speaking ? "shadow-[0_0_0_3px_var(--color-moss)]" : ""}`}
       style={{ background: `color-mix(in srgb, ${accent} 18%, var(--color-cocoa-3))` }}
     >
@@ -529,7 +537,12 @@ function Tile({ peer, compact }: { peer: Peer; compact?: boolean }) {
         </div>
       )}
       <div className="absolute bottom-2 left-2 flex max-w-[calc(100%-16px)] items-center gap-1.5 rounded-full bg-cocoa-0/75 px-2.5 py-1 text-[12.5px] font-semibold">
-        {!peer.micOn && <MicOff className="size-3.5 shrink-0 text-rust" />}
+        {state?.smute ? (
+          <MicOff className="size-3.5 shrink-0 text-honey" aria-label="Mutado por um admin" />
+        ) : (
+          !peer.micOn && <MicOff className="size-3.5 shrink-0 text-rust" />
+        )}
+        {!peer.isLocal && v.localMute[peer.identity] && <VolumeX className="size-3.5 shrink-0 text-oat/60" aria-label="Silenciado para você" />}
         <span className="truncate">{name}</span>
         {peer.isLocal && <span className="text-oat/45">(você)</span>}
         {peer.screen && <span className="rounded-[4px] bg-rust px-1 text-[9px] uppercase text-oat">ao vivo</span>}
