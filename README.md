@@ -18,7 +18,7 @@ Feito com Next.js 16, Tailwind 4 e [LiveKit](https://livekit.io) no site, e Fast
 Baixe na página de [Releases](https://github.com/JoaoAntonio08/call-dos-games/releases/latest).
 
 - **Windows** (`Call-dos-Games-Setup-x.y.z.exe`): app próprio (Electron) com seletor de tela/janela e som do PC no compartilhamento. Fonte em `desktop/`; gerar com `cd desktop && npm install && npm run dist`. O instalador não é assinado, então o Windows mostra um aviso: *Mais informações → Executar assim mesmo*.
-- **Android** (`Call-dos-Games-x.y.z.apk`): app que abre o site numa tela própria, com microfone, câmera, envio de arquivos e tela acesa durante a call. Fonte em `android/`; gerar com `bash android/build.sh` (só precisa do Android SDK e de um JDK 17, sem Gradle). Entrar com Google não funciona dentro do app: use e-mail e senha (dá para definir uma senha em Configurações se a conta foi criada pelo Google).
+- **Android** (`Call-dos-Games-x.y.z.apk`): Trusted Web Activity, ou seja, o site abre pelo Chrome do celular em tela cheia, sem barra de endereço. Microfone, câmera, notificações e login com Google funcionam como no Chrome. Fonte em `android/`; gerar com `cd android && ./gradlew assembleRelease` (precisa do Android SDK e de um JDK 17). O APK sai em `android/app/build/outputs/apk/release/`. Para o app abrir sem barra de endereço, o site precisa servir `/.well-known/assetlinks.json` com a impressão digital da chave que assinou o APK (já está em `public/.well-known/`).
 - Os dois apps carregam o site ao vivo: toda atualização do site já chega neles sem reinstalar.
 - A chave que assina o APK fica em `android/keystore/` e **não vai para o git**. Guarde um backup: sem ela, não dá para lançar uma versão nova que instale por cima da antiga.
 

@@ -3,10 +3,4 @@
     <color name="fundo">#1f2023</color>
     <color name="barra">#18191c</color>
     <color name="icone_fundo">#5865f2</color>
-    <style name="Tema" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/fundo</item>
-        <item name="android:statusBarColor">@color/barra</item>
-        <item name="android:navigationBarColor">@color/barra</item>
-        <item name="android:colorAccent">@color/icone_fundo</item>
-    </style>
 </resources>

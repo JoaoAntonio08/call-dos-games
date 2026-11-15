@@ -293,14 +293,30 @@ export function useCall() {
     setStatus("disconnected");
   }, [stopShare]);
 
-  // no app de celular, a tela não apaga enquanto estiver na call
+  // no celular (app ou navegador), a tela não apaga enquanto estiver na call
+  const inCall = status === "connected" || status === "reconnecting" || status === "connecting";
   useEffect(() => {
+    if (!inCall) return;
     const bridge = (window as unknown as { cdgAndroid?: { emCall(on: boolean): void } }).cdgAndroid;
-    if (!bridge) return;
-    const on = status === "connected" || status === "reconnecting" || status === "connecting";
-    bridge.emCall(on);
-    return () => bridge.emCall(false);
-  }, [status]);
+    bridge?.emCall(true);
+    let lock: WakeLockSentinel | null = null;
+    let dead = false;
+    const grab = () => {
+      if (dead || document.visibilityState !== "visible" || !("wakeLock" in navigator)) return;
+      navigator.wakeLock
+        .request("screen")
+        .then((l) => (dead ? void l.release() : (lock = l)))
+        .catch(() => {});
+    };
+    grab();
+    document.addEventListener("visibilitychange", grab);
+    return () => {
+      dead = true;
+      document.removeEventListener("visibilitychange", grab);
+      void lock?.release().catch(() => {});
+      bridge?.emCall(false);
+    };
+  }, [inCall]);
 
   // sai da sala ao fechar a página
   useEffect(() => {
