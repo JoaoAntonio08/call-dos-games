@@ -293,6 +293,15 @@ export function useCall() {
     setStatus("disconnected");
   }, [stopShare]);
 
+  // no app de celular, a tela não apaga enquanto estiver na call
+  useEffect(() => {
+    const bridge = (window as unknown as { cdgAndroid?: { emCall(on: boolean): void } }).cdgAndroid;
+    if (!bridge) return;
+    const on = status === "connected" || status === "reconnecting" || status === "connecting";
+    bridge.emCall(on);
+    return () => bridge.emCall(false);
+  }, [status]);
+
   // sai da sala ao fechar a página
   useEffect(() => {
     return () => {

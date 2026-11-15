@@ -13,6 +13,15 @@ O cantinho da turma: um "Discord nosso", com Nitro liberado para todo mundo.
 
 Feito com Next.js 16, Tailwind 4 e [LiveKit](https://livekit.io) no site, e FastAPI + Postgres na API (pasta `backend/`).
 
+## Apps (Windows e Android)
+
+Baixe na página de [Releases](https://github.com/JoaoAntonio08/call-dos-games/releases/latest).
+
+- **Windows** (`Call-dos-Games-Setup-x.y.z.exe`): app próprio (Electron) com seletor de tela/janela e som do PC no compartilhamento. Fonte em `desktop/`; gerar com `cd desktop && npm install && npm run dist`. O instalador não é assinado, então o Windows mostra um aviso: *Mais informações → Executar assim mesmo*.
+- **Android** (`Call-dos-Games-x.y.z.apk`): app que abre o site numa tela própria, com microfone, câmera, envio de arquivos e tela acesa durante a call. Fonte em `android/`; gerar com `bash android/build.sh` (só precisa do Android SDK e de um JDK 17, sem Gradle). Entrar com Google não funciona dentro do app: use e-mail e senha (dá para definir uma senha em Configurações se a conta foi criada pelo Google).
+- Os dois apps carregam o site ao vivo: toda atualização do site já chega neles sem reinstalar.
+- A chave que assina o APK fica em `android/keystore/` e **não vai para o git**. Guarde um backup: sem ela, não dá para lançar uma versão nova que instale por cima da antiga.
+
 ## Hospedagem
 
 | Parte | Onde | Custo |

@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.calldosgames.app",
+      "sha256_cert_fingerprints": ["3F:6B:FE:8C:45:54:BF:FB:FC:02:99:3A:33:EE:1B:35:7E:93:F4:DB:A1:2E:33:E0:8B:69:28:37:EA:DE:AA:61"]
+    }
+  }
+]

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <g transform="translate(204.8 204.8) scale(.6)">
+<!-- balão de conversa -->
+  <path d="M512 214c-188 0-330 114-330 268 0 86 44 162 116 213l-28 113c-4 17 14 30 29 21l132-80c26 5 53 8 81 8 188 0 330-114 330-275 0-154-142-268-330-268z" fill="#fff"/>
+  <!-- controle dentro do balão -->
+  <g fill="#4752e0">
+    <!-- cruz direcional -->
+    <rect x="322" y="452" width="148" height="48" rx="14"/>
+    <rect x="372" y="402" width="48" height="148" rx="14"/>
+    <!-- botões -->
+    <circle cx="642" cy="424" r="34"/>
+    <circle cx="712" cy="494" r="34"/>
+    <circle cx="572" cy="494" r="34" opacity=".55"/>
+    <circle cx="642" cy="564" r="34" opacity=".55"/>
+  </g>
+  </g>
+</svg>

@@ -57,3 +57,12 @@ backend/uploads-prod/
 backend/tools/
 backend/logs/
 !.env.example
+
+# apps
+desktop/node_modules/
+desktop/dist/
+android/keystore/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

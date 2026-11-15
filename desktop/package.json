@@ -1,0 +1,45 @@
+{
+  "name": "call-dos-games-desktop",
+  "productName": "Call dos Games",
+  "version": "1.0.0",
+  "description": "App de Windows do Call dos Games",
+  "author": "Call dos Games",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.calldosgames.app",
+    "productName": "Call dos Games",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "picker-preload.js",
+      "picker.html",
+      "offline.html",
+      "build/icon-256.png"
+    ],
+    "win": {
+      "icon": "build/icon-256.png",
+      "artifactName": "Call-dos-Games-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Call dos Games",
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
+  }
+}

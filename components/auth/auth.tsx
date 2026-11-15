@@ -112,7 +112,8 @@ function GoogleButton({ onSession, onError }: { onSession: (s: Session) => void;
 
   useEffect(() => {
     api<{ google_client_id: string | null }>("/auth/config")
-      .then((c) => setClientId(c.google_client_id))
+      // no app de celular o Google não deixa entrar por dentro do app; lá fica só o e-mail
+      .then((c) => setClientId("cdgAndroid" in window ? null : c.google_client_id))
       .catch(() => setClientId(null));
   }, []);
 
