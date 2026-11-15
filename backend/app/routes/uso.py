@@ -4,7 +4,7 @@ Cada app mede quantos bytes mandou de tela/câmera (estatística do WebRTC) e av
 O que sai do servidor de voz é isso vezes quem está assistindo (as outras pessoas da call).
 
 Quem vê e limita: dono e admins do servidor, cargos com a permissão "uso" e os admins da plataforma
-(PLATFORM_ADMINS no .env, por nome de usuário). Uma restrição tira a tela e a câmera da pessoa
+(PLATFORM_ADMIN_IDS no .env, por id imutável de usuário). Uma restrição tira a tela e a câmera da pessoa
 (o microfone continua). Pode ser manual (por um tempo ou até liberar) ou automática, quando a pessoa
 passa do limite de GB do servidor no dia ou no mês.
 """
@@ -32,12 +32,12 @@ MAX_REPORT_BYTES = 1_000_000_000
 PLATFORM = 0  # "escopo" das restrições que valem em todos os servidores
 
 
-def is_platform_admin(username: str | None) -> bool:
-    return bool(username) and username.lower() in settings.platform_admins  # type: ignore[union-attr]
+def is_platform_admin(user_id: int) -> bool:
+    return user_id in settings.platform_admin_ids
 
 
 async def platform_admin(user_id: int) -> bool:
-    return is_platform_admin(await pool().fetchval("SELECT username FROM users WHERE id = $1", user_id))
+    return is_platform_admin(user_id)
 
 
 async def require_usage(server_id: int, user_id: int) -> str:

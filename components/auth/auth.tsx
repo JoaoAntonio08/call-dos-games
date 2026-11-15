@@ -359,7 +359,8 @@ export function ResetForm() {
   const [token, setResetToken] = useState<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.hash.slice(1));
-    setResetToken(params.get("token") ?? "");
+    const value = params.get("token") ?? "";
+    queueMicrotask(() => setResetToken(value));
     if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
   }, []);
   return (

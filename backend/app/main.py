@@ -47,7 +47,13 @@ async def lifespan(_: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Call dos Games", lifespan=lifespan, docs_url="/docs", redoc_url=None)
+app = FastAPI(
+    title="Call dos Games",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.api_docs else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if settings.api_docs else None,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +76,17 @@ _LIMITED = {
 }
 
 
+def secure_response(response):
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox")
+    if settings.public_url.startswith("https://"):
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
     if request.method == "POST" and request.url.path in _LIMITED:
@@ -81,9 +98,10 @@ async def rate_limit(request: Request, call_next):
         while q and now - q[0] > 600:
             q.popleft()
         if len(q) >= settings.auth_rate_limit:
-            return JSONResponse({"error": "Muitas tentativas. Espere uns minutos e tente de novo."}, status_code=429)
+            return secure_response(JSONResponse({"error": "Muitas tentativas. Espere uns minutos e tente de novo."}, status_code=429))
         q.append(now)
-    return await call_next(request)
+    response = await call_next(request)
+    return secure_response(response)
 
 
 @app.exception_handler(StarletteHTTPException)
