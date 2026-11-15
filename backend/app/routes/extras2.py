@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request, UploadFile
 from pydantic import BaseModel
 
 from ..core import Auth, CurrentUser, err, file_url, new_id, parse_id, pool, settings, sid
-from ..files import save_upload
+from ..files import file_access_allowed, save_upload
 from ..realtime import hub
 from .servers import require_admin
 
@@ -77,8 +77,10 @@ class SaveStickerIn(BaseModel):
 async def save_sticker(body: SaveStickerIn, me: Auth = CurrentUser) -> list[dict]:
     """Salva na sua coleção uma figurinha que alguém mandou."""
     fid = parse_id(body.file_id)
-    row = await pool().fetchrow("SELECT name FROM files WHERE id = $1 AND kind = 'sticker'", fid)
+    row = await pool().fetchrow("SELECT id, owner_id, kind, name FROM files WHERE id = $1 AND kind = 'sticker'", fid)
     if not row:
+        raise err(404, "Figurinha não encontrada.")
+    if not await file_access_allowed(row, me):
         raise err(404, "Figurinha não encontrada.")
     await _room_for_sticker(me.id)
     name = re.sub(r"\.[a-z0-9]+$", "", row["name"], flags=re.I)[:40]

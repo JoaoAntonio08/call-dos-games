@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import io
+import json
 import mimetypes
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, Cookie, Depends, Header, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image, ImageSequence
 
-from .core import CurrentUser, Auth, err, file_url, new_id, parse_id, pool, settings, sid
+from .core import CurrentUser, Auth, err, file_url, new_id, parse_id, pool, settings, sid, user_from_token
+from .realtime import can_access_channel
 
 router = APIRouter()
 
@@ -43,6 +45,75 @@ INLINE_TYPES = {
     "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/aac",
     "text/plain",
 }
+PUBLIC_KINDS = {"avatar", "banner", "icon"}
+
+
+async def file_user(
+    authorization: str = Header(default=""),
+    cdg_session: str | None = Cookie(default=None),
+) -> Auth | None:
+    """Arquivos GET aceitam bearer ou o cookie HttpOnly emitido no login."""
+    token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else cdg_session
+    found = await user_from_token(token) if token else None
+    return Auth(*found) if found else None
+
+
+FileUser = Depends(file_user)
+
+
+async def file_access_allowed(row: Any, me: Auth | None) -> bool:
+    if row["kind"] in PUBLIC_KINDS:
+        return True
+    if not me:
+        return False
+    if row["owner_id"] == me.id:
+        return True
+
+    file_id = row["id"]
+    if row["kind"] == "sticker" and await pool().fetchval(
+        "SELECT 1 FROM stickers WHERE file_id = $1 AND user_id = $2", file_id, me.id
+    ):
+        return True
+    if row["kind"] == "sound" and await pool().fetchval(
+        """SELECT 1
+           WHERE EXISTS (
+               SELECT 1 FROM sounds s JOIN members m ON m.server_id = s.server_id
+               WHERE s.file_id = $1 AND m.user_id = $2
+           ) OR EXISTS (
+               SELECT 1 FROM users u
+               WHERE u.join_sound_id = $1 AND (
+                   EXISTS (SELECT 1 FROM members owner_m JOIN members viewer_m USING (server_id)
+                           WHERE owner_m.user_id = u.id AND viewer_m.user_id = $2)
+                   OR EXISTS (SELECT 1 FROM dm_participants owner_d JOIN dm_participants viewer_d USING (channel_id)
+                              WHERE owner_d.user_id = u.id AND viewer_d.user_id = $2)
+                   OR EXISTS (SELECT 1 FROM friendships f
+                              WHERE f.status = 'accepted' AND ((f.requester_id = u.id AND f.addressee_id = $2)
+                                   OR (f.addressee_id = u.id AND f.requester_id = $2)))
+               )
+           )""",
+        file_id,
+        me.id,
+    ):
+        return True
+    if row["kind"] == "emoji" and await pool().fetchval(
+        """SELECT 1 FROM emojis e JOIN members m ON m.server_id = e.server_id
+           WHERE e.file_id = $1 AND m.user_id = $2""",
+        file_id,
+        me.id,
+    ):
+        return True
+
+    # Anexos e figurinhas enviados só podem ser lidos por quem ainda vê a mensagem.
+    candidates = await pool().fetch(
+        "SELECT channel_id, visible_to FROM messages WHERE attachments @> $1::jsonb",
+        json.dumps([{"id": sid(file_id)}]),
+    )
+    for message in candidates:
+        if message["visible_to"] is not None and message["visible_to"] != me.id:
+            continue
+        if await can_access_channel(me.id, message["channel_id"]):
+            return True
+    return False
 
 
 async def read_limited(upload: UploadFile, limit: int) -> bytes:
@@ -143,9 +214,15 @@ async def upload_attachment(file: UploadFile, clip: bool = False, me: Auth = Cur
     return await save_upload(file, "attachment", me.id, clip=clip)
 
 
-async def _serve(file_id: str, still: bool) -> FileResponse:
-    row = await pool().fetchrow("SELECT mime, path, still_path, name FROM files WHERE id = $1", parse_id(file_id))
+async def _serve(file_id: str, still: bool, me: Auth | None) -> FileResponse:
+    row = await pool().fetchrow(
+        "SELECT id, owner_id, kind, mime, path, still_path, name FROM files WHERE id = $1", parse_id(file_id)
+    )
     if not row:
+        raise err(404, "Arquivo não encontrado.")
+    public = row["kind"] in PUBLIC_KINDS
+    if not await file_access_allowed(row, me):
+        # Não diferencie ID inexistente de ID existente sem permissão.
         raise err(404, "Arquivo não encontrado.")
     rel = row["still_path"] if still and row["still_path"] else row["path"]
     path = (settings.upload_dir / rel).resolve()
@@ -154,7 +231,7 @@ async def _serve(file_id: str, still: bool) -> FileResponse:
     mime = "image/png" if still and row["still_path"] else row["mime"]
     inline = mime in INLINE_TYPES
     headers = {
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": "public, max-age=31536000, immutable" if public else "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cross-Origin-Resource-Policy": "cross-origin",
@@ -169,10 +246,10 @@ async def _serve(file_id: str, still: bool) -> FileResponse:
 
 
 @router.get("/files/{file_id}")
-async def get_file(file_id: str) -> FileResponse:
-    return await _serve(file_id, still=False)
+async def get_file(file_id: str, me: Auth | None = FileUser) -> FileResponse:
+    return await _serve(file_id, still=False, me=me)
 
 
 @router.get("/files/{file_id}/still")
-async def get_still(file_id: str) -> FileResponse:
-    return await _serve(file_id, still=True)
+async def get_still(file_id: str, me: Auth | None = FileUser) -> FileResponse:
+    return await _serve(file_id, still=True, me=me)
