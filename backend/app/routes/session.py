@@ -63,7 +63,10 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
         "canSubscribe": not mods["deaf"],
         "canPublishData": True,
     }
-    if (src := publish_sources(mods["mute"])) is not None:
+    src = publish_sources(mods["mute"], mods.get("noshare", False))
+    if src == []:
+        grant["canPublish"] = False
+    elif src is not None:
         grant["canPublishSources"] = src
     now = int(time.time())
     claims = {

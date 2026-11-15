@@ -18,6 +18,7 @@ export const PERM_LABELS: { key: Perm; label: string; hint: string }[] = [
   { key: "hype", label: "Hype", hint: "chamar a turma para a call" },
   { key: "apelidos", label: "Apelidos", hint: "mudar o apelido dos outros" },
   { key: "moderar_voz", label: "Moderar call", hint: "mutar, ensurdecer, mover e tirar gente da call" },
+  { key: "uso", label: "Ver uso", hint: "quanto cada um gasta transmitindo e limitar quem gasta demais" },
 ];
 
 const ROLE_COLORS = ["#f23f43", "#f0b232", "#23a55a", "#1abc9c", "#00a8fc", "#5865f2", "#9b59b6", "#eb459e", "#99aab5"];

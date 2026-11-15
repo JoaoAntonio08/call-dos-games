@@ -28,7 +28,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { isUnread, useStore, useUser } from "@/lib/store";
-import { openModal, openUserMenu, toggleUI, useUI } from "@/lib/ui";
+import { openModal, openUserMenu, toast, toggleUI, useUI } from "@/lib/ui";
 import { useVoice, type Spin, type Stroke } from "@/lib/voice";
 import { DEFAULT_SHARE, RESOLUTIONS, type Peer, type ShareSettings } from "@/lib/use-call";
 import { loadJSON, saveJSON } from "@/lib/prefs";
@@ -178,6 +178,8 @@ interface StageMemo {
   spin: string | null;
   strokes: number;
 }
+const NO_SHARE = "Sua tela e câmera estão limitadas neste servidor (passou do limite de uso ou um admin restringiu). O microfone continua normal.";
+
 const stageMemo = new Map<string, StageMemo>();
 /** Roleta girada há mais tempo que isso não abre sozinha quando você volta para a call. */
 const FRESH_SPIN_MS = 12_000;
@@ -406,7 +408,11 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
         <DockButton label={v.deaf ? "Voltar a ouvir" : "Silenciar tudo"} off={v.deaf} onClick={() => v.setDeaf(!v.deaf)}>
           {v.deaf ? <HeadphoneOff /> : <Headphones />}
         </DockButton>
-        <DockButton label={me?.camera ? "Desligar câmera" : "Ligar câmera"} off={!me?.camera} onClick={call.toggleCamera}>
+        <DockButton
+          label={v.noShare ? "Câmera limitada neste servidor" : me?.camera ? "Desligar câmera" : "Ligar câmera"}
+          off={!me?.camera}
+          onClick={() => (v.noShare ? toast(NO_SHARE) : void call.toggleCamera())}
+        >
           {me?.camera ? <Video /> : <VideoOff />}
         </DockButton>
         <span className="mx-1 h-7 w-px bg-oat/10" />
@@ -415,7 +421,11 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
             <MonitorOff />
           </DockButton>
         ) : (
-          <DockButton label="Compartilhar tela" open={dock === "share"} onClick={() => toggle("share")}>
+          <DockButton
+            label={v.noShare ? "Transmissão limitada neste servidor" : "Compartilhar tela"}
+            open={dock === "share"}
+            onClick={() => (v.noShare ? toast(NO_SHARE) : toggle("share"))}
+          >
             <MonitorUp />
           </DockButton>
         )}

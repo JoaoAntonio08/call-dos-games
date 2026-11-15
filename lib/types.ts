@@ -32,6 +32,8 @@ export interface Me extends User {
   email: string | null;
   has_password: boolean;
   has_google: boolean;
+  /** admin da plataforma toda (vê o uso de todos os servidores) */
+  platform_admin?: boolean;
 }
 
 export type Relation = "none" | "friends" | "outgoing" | "incoming" | "self";
@@ -55,7 +57,7 @@ export interface Channel {
   send_roles?: string[];
 }
 
-export type Perm = "musica" | "dj" | "comandos" | "hype" | "apelidos" | "moderar_voz";
+export type Perm = "musica" | "dj" | "comandos" | "hype" | "apelidos" | "moderar_voz" | "uso";
 
 export interface Role {
   id: string;
@@ -173,6 +175,8 @@ export interface VoiceMember {
   sdeaf?: boolean;
   /** volume da pessoa para todos (0..1), escolhido por um admin */
   gain?: number;
+  /** sem poder transmitir tela/câmera (passou do limite ou foi restringido) */
+  noshare?: boolean;
 }
 
 export interface Game {

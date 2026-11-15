@@ -134,6 +134,8 @@ class Hub:
                 "smute": mods["mute"],
                 "sdeaf": mods["deaf"],
                 "gain": mods["gain"],
+                # sem poder transmitir tela/câmera (passou do limite ou foi restringido)
+                "noshare": mods.get("noshare", False),
                 "mic": bool(state.get("mic", True)) and not mods["mute"],
                 "deaf": bool(state.get("deaf", False)) or mods["deaf"],
                 "video": bool(state.get("video", False)),
@@ -144,18 +146,18 @@ class Hub:
             await self._announce_voice(channel_id)
 
     async def _mods(self, channel_id: int, user_id: int) -> dict[str, Any]:
-        row = await pool().fetchrow(
-            "SELECT vm.mute, vm.deaf, vm.gain FROM voice_mods vm JOIN channels c ON c.server_id = vm.server_id WHERE c.id = $1 AND vm.user_id = $2",
-            channel_id,
-            user_id,
-        )
-        return {"mute": row["mute"], "deaf": row["deaf"], "gain": float(row["gain"])} if row else {"mute": False, "deaf": False, "gain": 1.0}
+        from .routes.voz import mods_of  # noqa: PLC0415
+
+        return await mods_of(await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", channel_id), user_id)
 
     async def refresh_mods(self, channel_id: int, user_id: int, mods: dict[str, Any]) -> None:
         st = self.voice.get(channel_id, {}).get(user_id)
         if st is None:
             return
-        st.update({"smute": mods["mute"], "sdeaf": mods["deaf"], "gain": mods["gain"]})
+        st.update({"smute": mods["mute"], "sdeaf": mods["deaf"], "gain": mods["gain"], "noshare": mods.get("noshare", False)})
+        if mods.get("noshare"):
+            st["video"] = False
+            st["stream"] = False
         if mods["mute"]:
             st["mic"] = False
         if mods["deaf"]:

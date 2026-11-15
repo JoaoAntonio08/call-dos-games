@@ -45,21 +45,29 @@ async def livekit(method: str, room: str, body: dict[str, Any]) -> dict | None:
         return None
 
 
-def publish_sources(mute: bool) -> list[str] | None:
-    """Fontes que a pessoa pode transmitir. None = todas."""
-    return ["camera", "screen_share", "screen_share_audio"] if mute else None
+def publish_sources(mute: bool, noshare: bool = False) -> list[str] | None:
+    """Fontes que a pessoa pode transmitir. None = todas; lista vazia = nenhuma."""
+    if not mute and not noshare:
+        return None
+    return ([] if mute else ["microphone"]) + ([] if noshare else ["camera", "screen_share", "screen_share_audio"])
 
 
 async def mods_of(server_id: int | None, user_id: int) -> dict[str, Any]:
+    from .uso import active_block
+
+    block = await active_block(server_id, user_id)
+    base = {"mute": False, "deaf": False, "gain": 1.0, "noshare": block is not None}
     if server_id is None:
-        return {"mute": False, "deaf": False, "gain": 1.0}
+        return base
     row = await pool().fetchrow("SELECT mute, deaf, gain FROM voice_mods WHERE server_id = $1 AND user_id = $2", server_id, user_id)
-    return {"mute": row["mute"], "deaf": row["deaf"], "gain": float(row["gain"])} if row else {"mute": False, "deaf": False, "gain": 1.0}
+    return {**base, "mute": row["mute"], "deaf": row["deaf"], "gain": float(row["gain"])} if row else base
 
 
 async def apply_permissions(channel_id: int, user_id: int, mods: dict[str, Any]) -> None:
     perm: dict[str, Any] = {"can_subscribe": not mods["deaf"], "can_publish": True, "can_publish_data": True}
-    src = publish_sources(mods["mute"])
+    src = publish_sources(mods["mute"], mods.get("noshare", False))
+    if src == []:
+        perm["can_publish"] = False  # lista vazia no LiveKit quer dizer "tudo": aqui é "nada"
     perm["can_publish_sources"] = [s.upper() for s in src] if src else []
     await livekit("UpdateParticipant", room_name(channel_id), {"identity": str(user_id), "permission": perm})
 

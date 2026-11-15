@@ -298,3 +298,26 @@ CREATE TABLE IF NOT EXISTS server_bots (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS server_bots_server ON server_bots (server_id);
+
+-- uso de transmissão (tela/câmera) por pessoa e dia; scope = id do servidor (0 = conversas diretas)
+CREATE TABLE IF NOT EXISTS share_usage (
+    scope     BIGINT NOT NULL,
+    user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day       DATE NOT NULL,
+    seconds   INT NOT NULL DEFAULT 0,
+    bytes_up  BIGINT NOT NULL DEFAULT 0,
+    bytes_out BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, user_id, day)
+);
+CREATE INDEX IF NOT EXISTS share_usage_day ON share_usage (day);
+-- quem está sem poder transmitir; scope = servidor (0 = a plataforma toda); until NULL = até liberar
+CREATE TABLE IF NOT EXISTS share_blocks (
+    scope      BIGINT NOT NULL,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    until      TIMESTAMPTZ,
+    reason     TEXT NOT NULL DEFAULT 'manual',
+    by_id      BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope, user_id)
+);
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS share_limit JSONB NOT NULL DEFAULT '{}';

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { RoomEvent, type RemoteParticipant, type Track } from "livekit-client";
+import { RoomEvent, Track, type RemoteParticipant } from "livekit-client";
 import { api, upload } from "./api";
 import { gateway, loadQueue, setQueue, useStore } from "./store";
 import { useCall, type Call, type PeerMeta } from "./use-call";
@@ -127,6 +127,8 @@ interface VoiceCtx {
   setLocalMute: (id: string, v: boolean) => void;
   /** um admin te mutou / tirou seu som para todos */
   serverMute: boolean;
+  /** tela e câmera bloqueadas aqui (limite de uso ou restrição) */
+  noShare: boolean;
   serverDeaf: boolean;
   strokes: Stroke[];
   spin: Spin | null;
@@ -331,6 +333,75 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const myState = here?.find((m) => m.user_id === me?.id);
   const serverMute = !!myState?.smute;
   const serverDeaf = !!myState?.sdeaf;
+  // tela e câmera bloqueadas neste servidor (limite de uso ou restrição de um admin)
+  const noShare = !!myState?.noshare;
+  const callStopShare = call.stopShare;
+  const callRoomForShare = call.room;
+  useEffect(() => {
+    if (!noShare || !channelId) return;
+    void callStopShare();
+    void callRoomForShare?.localParticipant.setCameraEnabled(false).catch(() => {});
+  }, [noShare, channelId, callStopShare, callRoomForShare]);
+  useEffect(() => {
+    const until = (iso: string | null) =>
+      iso ? `até ${new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "até alguém liberar";
+    const onBlock = (e: Event) => {
+      const d = (e as CustomEvent<{ server_name: string | null; until: string | null; reason: string }>).detail;
+      const where = d.server_name ? `em ${d.server_name}` : "em todos os servidores";
+      toast(
+        d.reason === "auto"
+          ? `Você passou do limite de transmissão ${where}: tela e câmera ficam desligadas ${until(d.until)}.`
+          : `Sua transmissão (tela e câmera) foi limitada ${where} ${until(d.until)}.`,
+      );
+    };
+    const onUnblock = () => toast("Você já pode transmitir tela e câmera de novo.");
+    window.addEventListener("cdg:share-block", onBlock);
+    window.addEventListener("cdg:share-unblock", onUnblock);
+    return () => {
+      window.removeEventListener("cdg:share-block", onBlock);
+      window.removeEventListener("cdg:share-unblock", onUnblock);
+    };
+  }, []);
+
+  // medição do que você transmite (tela e câmera): bytes enviados de verdade, avisados a cada 30 s
+  useEffect(() => {
+    const r = callRoomForShare;
+    if (!r || !channelId) return;
+    const last = new Map<string, number>();
+    const tick = async () => {
+      if (r.state !== "connected") return;
+      let screen = 0;
+      let camera = 0;
+      let active = false;
+      for (const pub of r.localParticipant.trackPublications.values()) {
+        const src = pub.source;
+        const isScreen = src === Track.Source.ScreenShare || src === Track.Source.ScreenShareAudio;
+        if (!pub.track || (!isScreen && src !== Track.Source.Camera)) continue;
+        active = true;
+        try {
+          const report = await pub.track.getRTCStatsReport();
+          let sent = 0;
+          report?.forEach((st: { type: string; bytesSent?: number }) => {
+            if (st.type === "outbound-rtp" && st.bytesSent) sent += st.bytesSent;
+          });
+          const key = pub.trackSid;
+          const delta = Math.max(0, sent - (last.get(key) ?? 0));
+          last.set(key, sent);
+          if (isScreen) screen += delta;
+          else camera += delta;
+        } catch {
+          /* sem estatística dessa trilha */
+        }
+      }
+      if (!active && !screen && !camera) return;
+      void api("/voice/usage", { json: { channel_id: channelId, screen_bytes: Math.round(screen), camera_bytes: Math.round(camera), seconds: active ? 30 : 0 } }).catch(() => {});
+    };
+    const id = window.setInterval(() => void tick(), 30_000);
+    return () => {
+      window.clearInterval(id);
+      void tick();
+    };
+  }, [callRoomForShare, channelId]);
   const serverMuteRef = useRef(serverMute);
   useEffect(() => {
     serverMuteRef.current = serverMute;
@@ -687,6 +758,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       localMute,
       setLocalMute,
       serverMute,
+      noShare,
       serverDeaf,
       strokes,
       spin,
@@ -707,7 +779,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       isDj,
       clip,
     }),
-    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, isDj, clip],
+    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, isDj, clip, noShare],
   );
 
   return (

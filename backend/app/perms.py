@@ -19,6 +19,7 @@ PERMS: dict[str, str] = {
     "hype": "Chamar a turma para a call (hype)",
     "apelidos": "Mudar o apelido dos outros",
     "moderar_voz": "Mutar, ensurdecer, mover e desconectar quem está na call",
+    "uso": "Ver quanto cada um gasta transmitindo e limitar quem gasta demais",
 }
 RANK = {"member": 0, "admin": 1, "owner": 2}
 

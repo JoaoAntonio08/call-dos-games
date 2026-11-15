@@ -35,6 +35,9 @@ async def me_out(user_id: int) -> dict[str, Any]:
     extra = await pool().fetchrow("SELECT email, password_hash IS NOT NULL AS has_password, google_sub IS NOT NULL AS has_google FROM users WHERE id = $1", user_id)
     out = user_out(row)
     out.update({"email": extra["email"], "has_password": extra["has_password"], "has_google": extra["has_google"]})
+    from .uso import is_platform_admin
+
+    out["platform_admin"] = is_platform_admin(row["username"])
     return out
 
 

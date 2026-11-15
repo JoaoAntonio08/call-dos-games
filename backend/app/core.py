@@ -47,6 +47,8 @@ class Settings:
     steam_key = env("STEAM_API_KEY")
     # opcional: /tocar pelo nome da música (console.cloud.google.com, YouTube Data API v3)
     youtube_key = env("YOUTUBE_API_KEY")
+    # quem administra a plataforma toda (vê o uso de todos os servidores); nomes de usuário separados por vírgula
+    platform_admins = {u.strip().lower().lstrip("@") for u in env("PLATFORM_ADMINS", "djpizza").split(",") if u.strip()}
 
 
 settings = Settings()

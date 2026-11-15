@@ -16,6 +16,7 @@ import { BotsTab, SteamSettings } from "./integracoes";
 import { DesktopGameSettings } from "./jogo-app";
 import { ChannelAccess, MemberRoles, RolesTab } from "./cargos";
 import { BotBuilder } from "./bot-builder";
+import { PlatformTab, UsageTab } from "./uso";
 import { Room } from "livekit-client";
 
 export function Modals() {
@@ -339,6 +340,7 @@ const ACCENTS = ["#5865f2", "#f23f43", "#f0b232", "#23a55a", "#1abc9c", "#00a8fc
 
 function UserSettings({ tab: initial }: { tab?: string }) {
   const [tab, setTab] = useState(initial ?? "perfil");
+  const platform = useStore((s) => !!s.me?.platform_admin);
   return (
     <SettingsFrame
       title="Suas configurações"
@@ -349,6 +351,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         ["voz", "Voz e vídeo"],
         ["jogos", "Jogos"],
         ["conta", "Conta"],
+        ...(platform ? ([["plataforma", "Plataforma"]] as [string, string][]) : []),
       ]}
       footer={
         <button
@@ -373,6 +376,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         </div>
       )}
       {tab === "conta" && <AccountTab />}
+      {tab === "plataforma" && platform && <PlatformTab />}
     </SettingsFrame>
   );
 }
@@ -869,6 +873,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
           ["webhooks", "Webhooks"],
         ] as [string, string][])
       : []),
+    ...(admin || server.my_perms?.includes("uso") ? ([["uso", "Uso"]] as [string, string][]) : []),
   ];
   return (
     <SettingsFrame title={server.name} tab={tab} setTab={setTab} tabs={tabs}>
@@ -881,6 +886,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
       {tab === "cargos" && <RolesTab server={server} />}
       {tab === "bots" && <BotBuilder server={server} />}
       {tab === "webhooks" && <BotsTab server={server} />}
+      {tab === "uso" && <UsageTab serverId={server.id} />}
     </SettingsFrame>
   );
 }

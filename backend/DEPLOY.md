@@ -167,6 +167,13 @@ Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reco
 - **Música:** `/tocar nome ou link` põe na fila da call de quem pediu; `/fila` e `/pular` também. O comando e a resposta só aparecem para quem digitou e somem em 12 horas. Só quem pôs a música (ou DJ/admin) pausa e pula; os outros votam (mais da metade da call pula). Cada um tem o próprio volume.
 - **Bots sem código** (Configurações do servidor → Bots): o bot junta módulos (música, diversão, enquete, boas-vindas, respostas automáticas, filtro de palavras, lembretes e cargo automático), escolhendo canais e cargos. Lembretes usam o horário de Brasília.
 
+### Uso de transmissão (tela e câmera)
+
+- O app de cada pessoa conta a cada 30 segundos quanto ela enviou de tela e câmera; a API multiplica por quem está assistindo ("saindo do servidor", o que pesa na banda). Voz, música e YouTube junto não entram.
+- **Configurações do servidor → Uso** (dono, admins e cargos com a permissão "Ver uso"): ranking de hoje, 7 ou 30 dias, quem está ao vivo, **Restringir** (1 hora, 1 dia, 7 dias ou até liberar) e **Liberar**. Restringido fica sem tela e câmera naquele servidor, com aviso; o microfone continua.
+- **Limite automático** na mesma aba: X GB por pessoa por dia ou por mês. Quem passa fica sem tela e câmera até o fim do dia/mês (horário de Brasília). Dono e admins não entram no limite.
+- **Admin da plataforma:** `PLATFORM_ADMINS=djpizza` no `backend/.env` (nomes de usuário separados por vírgula; se não colocar nada, vale `djpizza`). Ele ganha a aba **Configurações → Plataforma**, com o uso de todos os servidores e das conversas diretas, e pode restringir alguém em todos os servidores de uma vez.
+
 ### Comandos de bot
 
 `/dado`, `/moeda`, `/sortear`, `/escolher` e `/ajuda` já vêm prontos. Em **Configurações do servidor → Webhooks**, cada webhook pode ganhar comandos próprios e um endereço `https://` público: quando alguém usa o comando, a API faz um `POST` JSON (`{type, command, args, user, channel_id, server_id, message_id, timestamp}`) para esse endereço, com o cabeçalho `X-CDG-Signature: sha256=<HMAC-SHA256 do corpo>`, usando como chave o sha256 (em hexadecimal) do token do webhook. A resposta no formato do Discord (`{"content": "..."}`) vira mensagem do bot; resposta vazia (204) deixa o bot responder depois pelo próprio webhook. A API só chama endereços públicos (nada de `localhost` ou rede interna).
