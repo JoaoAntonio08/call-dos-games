@@ -12,7 +12,7 @@ from collections import deque
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, Header, Request, UploadFile
 from pydantic import BaseModel
 
 from ..core import Auth, CurrentUser, err, file_url, new_id, parse_id, pool, settings, sid
@@ -367,8 +367,8 @@ async def create_webhook(channel_id: str, body: WebhookIn, me: Auth = CurrentUse
     await pool().execute(
         "INSERT INTO webhooks (id, channel_id, name, token_hash, created_by) VALUES ($1,$2,$3,$4,$5)", wid, cid, name, _hash(token), me.id
     )
-    # o link completo só aparece agora: depois só dá para apagar e criar outro
-    return {"id": sid(wid), "name": name, "url": f"{settings.public_url}/webhooks/{sid(wid)}/{token}"}
+    # O token aparece uma vez, separado da URL, para não vazar em access logs.
+    return {"id": sid(wid), "name": name, "url": f"{settings.public_url}/webhooks/{sid(wid)}", "token": token}
 
 
 @router.delete("/webhooks/{webhook_id}")
@@ -385,13 +385,19 @@ async def delete_webhook(webhook_id: str, me: Auth = CurrentUser) -> dict:
 _hook_hits: dict[int, deque[float]] = {}
 
 
-@router.post("/webhooks/{webhook_id}/{token}")
-async def run_webhook(webhook_id: str, token: str, request: Request) -> dict:
+@router.post("/webhooks/{webhook_id}")
+async def run_webhook(
+    webhook_id: str,
+    request: Request,
+    authorization: str = Header(default=""),
+    x_webhook_token: str = Header(default="", alias="X-Webhook-Token"),
+) -> dict:
     """Manda mensagem como bot. Aceita o mesmo formato básico do Discord: {"content": "...", "username": "..."}."""
     try:
         wid = parse_id(webhook_id)
     except Exception:
         raise err(404, "Webhook não encontrado.")
+    token = x_webhook_token or (authorization[7:].strip() if authorization.lower().startswith("bearer ") else "")
     row = await pool().fetchrow("SELECT id, channel_id, name, token_hash FROM webhooks WHERE id = $1", wid)
     if not row or not secrets.compare_digest(row["token_hash"], _hash(token)):
         raise err(404, "Webhook não encontrado.")
