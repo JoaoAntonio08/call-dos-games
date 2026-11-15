@@ -64,11 +64,20 @@ export interface YtState {
   /** quem fez a última ação */
   by: string;
   byName: string;
+  /** de quem é a música/vídeo: só essa pessoa (ou DJ/admin) pausa, pula e mexe no tempo */
+  owner?: string;
+  ownerName?: string;
+}
+
+export interface YtOwner {
+  id: string;
+  name: string;
 }
 
 type Msg =
   | { t: "state"; s: Omit<YtState, "at">; cmd: boolean }
   | { t: "stop"; byName: string }
+  | { t: "skip"; force: boolean; byName: string }
   | { t: "req" };
 
 const TOPIC = "yt";
@@ -83,12 +92,15 @@ function leaderOf(room: Room, s: YtState): string {
   return ids.includes(s.by) ? s.by : [...ids].sort()[0];
 }
 
-export function useYouTubeSync(room: Room | null, flash: (m: string) => void, onEnded?: () => boolean) {
+export function useYouTubeSync(room: Room | null, flash: (m: string) => void, onEnded?: () => boolean, isDj = false) {
   const onEndedRef = useRef(onEnded);
   useEffect(() => {
     onEndedRef.current = onEnded;
   }, [onEnded]);
   const [state, setState] = useState<YtState | null>(null);
+  // votos para pular a música que está tocando agora
+  const votesRef = useRef<{ video: string; ids: Set<string> }>({ video: "", ids: new Set() });
+  const [skipVotes, setSkipVotes] = useState<{ video: string; count: number }>({ video: "", count: 0 });
   const stateRef = useRef<YtState | null>(null);
   const playerRef = useRef<YTPlayer | null>(null);
 
@@ -134,6 +146,7 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
       const prev = stateRef.current;
       const videoId = patch.videoId ?? prev?.videoId;
       if (!videoId) return;
+      const fresh = patch.videoId !== undefined && patch.videoId !== prev?.videoId;
       const s: YtState = {
         videoId,
         playing: patch.playing ?? prev?.playing ?? true,
@@ -141,6 +154,8 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
         at: Date.now(),
         by: me.identity,
         byName: me.name || "Alguém",
+        owner: patch.owner ?? (fresh || !prev ? me.identity : (prev.owner ?? prev.by)),
+        ownerName: patch.ownerName ?? (fresh || !prev ? me.name || "Alguém" : (prev.ownerName ?? prev.byName)),
       };
       set(s);
       applyToPlayer(s, 0.4);
@@ -153,10 +168,10 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
   const localTime = () => playerRef.current?.getCurrentTime() ?? (stateRef.current ? expectedTime(stateRef.current) : 0);
 
   const load = useCallback(
-    (input: string) => {
+    (input: string, owner?: YtOwner) => {
       const parsed = parseYouTube(input);
       if (!parsed) return false;
-      commit({ videoId: parsed.id, time: parsed.start, playing: true });
+      commit({ videoId: parsed.id, time: parsed.start, playing: true, owner: owner?.id, ownerName: owner?.name });
       return true;
     },
     [commit],
@@ -168,6 +183,39 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
     set(null);
     send({ t: "stop", byName: me?.name || "Alguém" });
   }, [me, send, set]);
+  /** Pode pausar, pular e mexer no tempo: quem pôs a música, DJ/admin, ou ninguém tocando. */
+  const canControl = !state || !me || isDj || (state.owner ?? state.by) === me.identity;
+
+  /** Um pedido de pular (botão de alguém ou /pular no chat). Quem decide é o líder da sala. */
+  const handleSkip = useCallback(
+    (who: string, whoName: string, force: boolean) => {
+      const s = stateRef.current;
+      if (!s || !room) return;
+      if (votesRef.current.video !== s.videoId) votesRef.current = { video: s.videoId, ids: new Set() };
+      votesRef.current.ids.add(who);
+      setSkipVotes({ video: s.videoId, count: votesRef.current.ids.size });
+      if (leaderOf(room, s) !== room.localParticipant.identity) return;
+      const total = room.remoteParticipants.size + 1;
+      const owner = s.owner ?? s.by;
+      if (force || who === owner || votesRef.current.ids.size * 2 > total) {
+        if (!force && who !== owner) flash("A turma votou e a música foi pulada");
+        else if (who !== room.localParticipant.identity) flash(`${whoName} pulou a música`);
+        if (!onEndedRef.current?.()) {
+          set(null);
+          send({ t: "stop", byName: whoName });
+        }
+      }
+    },
+    [flash, room, send, set],
+  );
+
+  /** Pular: se a música é sua (ou você é DJ), pula; senão vira voto. */
+  const skip = useCallback(() => {
+    if (!me) return;
+    send({ t: "skip", force: canControl, byName: me.name || "Alguém" });
+    handleSkip(me.identity, me.name || "Alguém", canControl);
+  }, [canControl, handleSkip, me, send]);
+
   /** Puxa o estado de quem está controlando, caso o vídeo tenha se perdido. */
   const resync = useCallback(() => {
     if (stateRef.current) applyToPlayer(stateRef.current, 0.25);
@@ -192,6 +240,8 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
         if (msg.cmd && prev?.videoId !== s.videoId) flash(`${s.byName} colocou um vídeo do YouTube`);
         set(s);
         applyToPlayer(s, msg.cmd ? 0.6 : 1.5);
+      } else if (msg.t === "skip") {
+        handleSkip(participant.identity, msg.byName || participant.name || "Alguém", !!msg.force);
       } else if (msg.t === "stop") {
         if (stateRef.current) flash(`${msg.byName} fechou o vídeo`);
         set(null);
@@ -225,7 +275,20 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
       room.off(RoomEvent.ParticipantConnected, onJoin);
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [applyToPlayer, flash, room, send, set]);
+  }, [applyToPlayer, flash, handleSkip, room, send, set]);
+
+  // /pular digitado no chat chega pelo servidor
+  useEffect(() => {
+    if (!room) return;
+    const onSkip = (e: Event) => {
+      const d = (e as CustomEvent<{ user_id: string; force: boolean }>).detail;
+      const p = d.user_id === room.localParticipant.identity ? room.localParticipant : room.remoteParticipants.get(d.user_id);
+      if (!p) return;
+      handleSkip(d.user_id, p.name || "Alguém", d.force);
+    };
+    window.addEventListener("cdg:music-skip", onSkip);
+    return () => window.removeEventListener("cdg:music-skip", onSkip);
+  }, [handleSkip, room]);
 
   // batimento: o "líder" manda a posição a cada 4 s, e quem estiver atrasado se corrige
   useEffect(() => {
@@ -264,7 +327,8 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
     [commit, me],
   );
 
-  return { state, load, play, pause, seek, stop, resync, registerPlayer, onPlayerState, playerRef };
+  const votes = state && skipVotes.video === state.videoId ? skipVotes.count : 0;
+  return { state, load, play, pause, seek, stop, resync, registerPlayer, onPlayerState, playerRef, canControl, skip, votes };
 }
 
 export type YouTubeSync = ReturnType<typeof useYouTubeSync>;

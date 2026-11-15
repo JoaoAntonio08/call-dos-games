@@ -516,6 +516,7 @@ function handleEvent(t: string, d: any) {
     case "voice_move":
     case "voice_kick":
     case "hype":
+    case "music_skip":
       window.dispatchEvent(new CustomEvent(`cdg:${t.replace("_", "-")}`, { detail: d }));
       break;
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SpeakingDetector } from "./speaking";
 import {
   AudioPresets,
   ConnectionState,
@@ -106,7 +107,7 @@ function trackOf(p: Participant, source: Track.Source): Track | undefined {
   return pub.track;
 }
 
-function snapshot(room: Room): Peer[] {
+function snapshot(room: Room, det?: SpeakingDetector | null): Peer[] {
   const all: Participant[] = [room.localParticipant, ...room.remoteParticipants.values()];
   return all.map((p) => {
     const micPub = p.getTrackPublication(Track.Source.Microphone);
@@ -114,7 +115,8 @@ function snapshot(room: Room): Peer[] {
       identity: p.identity,
       name: p.name || p.identity.split("#")[0],
       isLocal: p === room.localParticipant,
-      speaking: p.isSpeaking,
+      // medido aqui no aparelho (na hora); se não deu para medir, vale o aviso do servidor
+      speaking: det?.speaking(p.identity) ?? p.isSpeaking,
       micOn: !!micPub && !micPub.isMuted,
       mic: trackOf(p, Track.Source.Microphone),
       camera: trackOf(p, Track.Source.Camera),
@@ -165,9 +167,21 @@ export function useCall() {
   /** por que a última call acabou sem você clicar em sair */
   const [endReason, setEndReason] = useState<"elsewhere" | "removed" | null>(null);
 
+  const detRef = useRef<SpeakingDetector | null>(null);
   const refresh = useCallback(() => {
     const r = roomRef.current;
-    if (r) setPeers(snapshot(r));
+    if (!r) return;
+    const det = (detRef.current ??= new SpeakingDetector(() => {
+      const room = roomRef.current;
+      if (room) setPeers(snapshot(room, detRef.current));
+    }));
+    const all: Participant[] = [r.localParticipant, ...r.remoteParticipants.values()];
+    det.sync(new Map(all.map((p) => [p.identity, trackOf(p, Track.Source.Microphone)?.mediaStreamTrack])));
+    setPeers(snapshot(r, det));
+  }, []);
+  const stopDetector = useCallback(() => {
+    detRef.current?.close();
+    detRef.current = null;
   }, []);
 
   const flash = useCallback((msg: string) => setNotice(msg), []);
@@ -254,6 +268,8 @@ export function useCall() {
           // solta a sala: sem isso, depois de cair (ex.: entrou pelo celular) não dava para entrar de novo sem reiniciar
           if (roomRef.current === r) {
             roomRef.current = null;
+            detRef.current?.close();
+            detRef.current = null;
             setRoom(null);
             setPeers([]);
           }
@@ -303,10 +319,11 @@ export function useCall() {
     await stopShare();
     await roomRef.current?.disconnect();
     roomRef.current = null;
+    stopDetector();
     setRoom(null);
     setPeers([]);
     setStatus("disconnected");
-  }, [stopShare]);
+  }, [stopShare, stopDetector]);
 
   // no celular (app ou navegador), a tela não apaga enquanto estiver na call
   const inCall = status === "connected" || status === "reconnecting" || status === "connecting";

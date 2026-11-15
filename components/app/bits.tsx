@@ -270,7 +270,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       onClick={() => onChange(!checked)}
       className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${checked ? "bg-ember" : "bg-cocoa-5"}`}
     >
-      <span className={`absolute top-1 size-4 rounded-full bg-oat transition-transform duration-200 ${checked ? "translate-x-5" : "translate-x-1"}`} />
+      <span className={`absolute left-0 top-1 size-4 rounded-full bg-oat transition-transform duration-200 ${checked ? "translate-x-5" : "translate-x-1"}`} />
     </button>
   );
 }

@@ -210,9 +210,19 @@ async def unvote(item_id: str, me: Auth = CurrentUser) -> list[dict]:
 
 
 @router.delete("/queue/{item_id}")
-async def remove_from_queue(item_id: str, me: Auth = CurrentUser) -> list[dict]:
-    """Tirar da fila (ou "tocar agora", que tira e coloca no player)."""
+async def remove_from_queue(item_id: str, played: int = 0, me: Auth = CurrentUser) -> list[dict]:
+    """Tirar da fila (ou "tocar agora"/próxima da fila, que tira e coloca no player)."""
     row = await _queue_item(parse_id(item_id), me.id)
+    if not played:
+        info = await pool().fetchrow(
+            "SELECT q.added_by, c.server_id FROM queue_items q JOIN channels c ON c.id = q.channel_id WHERE q.id = $1", row["id"]
+        )
+        if info and info["server_id"] is not None and info["added_by"] not in (None, me.id):
+            from ..perms import member as perms_member
+
+            who = await perms_member(info["server_id"], me.id)
+            if not (who and who.can("dj")):
+                raise err(403, "Só quem pôs (ou um DJ) tira da fila.")
     await pool().execute("DELETE FROM queue_items WHERE id = $1", row["id"])
     return await announce_queue(row["channel_id"])
 

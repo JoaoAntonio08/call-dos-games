@@ -20,7 +20,7 @@ router = APIRouter()
 @router.get("/bootstrap")
 async def bootstrap(me: Auth = CurrentUser) -> dict:
     server_ids = [r["server_id"] for r in await pool().fetch("SELECT server_id FROM members WHERE user_id = $1 ORDER BY joined_at", me.id)]
-    servers = [await server_out(s) for s in server_ids]
+    servers = [await server_out(s, me.id) for s in server_ids]
     dms = await list_dms(me.id)
     reads = await pool().fetch("SELECT channel_id, last_read_id FROM read_states WHERE user_id = $1", me.id)
     visible: list[int] = [int(c["id"]) for s in servers for c in s["channels"]] + [int(d["id"]) for d in dms]
@@ -58,7 +58,8 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
     grant: dict = {
         "room": f"cdg-{cid}",
         "roomJoin": True,
-        "canPublish": True,
+        # canal de voz restrito: quem não tem o cargo só escuta
+        "canPublish": bool(ch.get("can_send", True)),
         "canSubscribe": not mods["deaf"],
         "canPublishData": True,
     }

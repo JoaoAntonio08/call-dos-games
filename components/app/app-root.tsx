@@ -23,6 +23,15 @@ export function AppRoot() {
     return () => window.removeEventListener("cdg:logout", onLogout);
   }, []);
 
+  // o app de Windows pede para abrir links do próprio site aqui dentro (sem recarregar e sem derrubar a call)
+  useEffect(() => {
+    const w = window as unknown as { __cdgOpen?: (p: string) => void };
+    w.__cdgOpen = (p: string) => router.push(p);
+    return () => {
+      delete w.__cdgOpen;
+    };
+  }, [router]);
+
   useEffect(() => {
     if (API_READY && phase === "anon") router.replace(`/entrar?next=${encodeURIComponent(path)}`);
   }, [phase, router, path]);

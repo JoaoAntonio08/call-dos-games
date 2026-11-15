@@ -151,18 +151,25 @@ O botão do Google aparece sozinho quando o ID está preenchido. A "chave secret
 
 Sem configurar, o link de redefinir aparece em `journalctl -u calldosgames-api`, e dá para mandar para o amigo na mão. Para enviar por e-mail, crie uma conta grátis em <https://resend.com>, verifique o domínio e preencha `RESEND_API_KEY` e `EMAIL_FROM`.
 
-## 11. GIFs e Steam (opcional)
+## 11. GIFs, Steam e música pelo nome (opcional)
 
 - **GIFs no chat:** crie uma conta em <https://developers.giphy.com>, clique em **Create an API Key** (tipo *API*), e coloque a chave em `GIPHY_API_KEY`.
 - **Steam ("jogando agora" e jogos recentes):** entre na Steam e pegue a chave em <https://steamcommunity.com/dev/apikey> (no domínio pode colocar o do site). Coloque em `STEAM_API_KEY`.
+- **/tocar pelo nome da música:** em <https://console.cloud.google.com> crie um projeto, ative a **YouTube Data API v3** (APIs e serviços → Biblioteca) e crie uma **chave de API** (APIs e serviços → Credenciais). Coloque em `YOUTUBE_API_KEY`. Sem ela, o /tocar funciona só com link do YouTube. A cota grátis dá umas 100 buscas por dia.
 
 Depois: `sudo systemctl restart calldosgames-api`. Sem as chaves, o resto funciona e o app só avisa que essas partes estão desligadas. Cada pessoa liga a própria Steam em **Configurações → Jogos**, colando o link do perfil (o perfil e os detalhes de jogo precisam estar públicos na Steam).
 
 Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reconhece o jogo aberto no PC (lista em `desktop/jogos.js`, e cada um pode adicionar o seu em **Configurações → Jogos**).
 
+### Cargos, música e bots sem código
+
+- **Cargos** (Configurações do servidor → Cargos): cada cargo libera permissões (pôr música, DJ, comandos, hype, apelidos, moderar call). "Todo mundo" vale para quem não tem cargo; dono e admins podem tudo. Em **Canais**, cada canal pode ficar visível só para alguns cargos, e só alguns podem escrever (texto) ou falar (voz; os outros só escutam).
+- **Música:** `/tocar nome ou link` põe na fila da call de quem pediu; `/fila` e `/pular` também. O comando e a resposta só aparecem para quem digitou e somem em 12 horas. Só quem pôs a música (ou DJ/admin) pausa e pula; os outros votam (mais da metade da call pula). Cada um tem o próprio volume.
+- **Bots sem código** (Configurações do servidor → Bots): o bot junta módulos (música, diversão, enquete, boas-vindas, respostas automáticas, filtro de palavras, lembretes e cargo automático), escolhendo canais e cargos. Lembretes usam o horário de Brasília.
+
 ### Comandos de bot
 
-`/dado`, `/moeda`, `/sortear`, `/escolher` e `/ajuda` já vêm prontos. Em **Configurações do servidor → Bots**, cada webhook pode ganhar comandos próprios e um endereço `https://` público: quando alguém usa o comando, a API faz um `POST` JSON (`{type, command, args, user, channel_id, server_id, message_id, timestamp}`) para esse endereço, com o cabeçalho `X-CDG-Signature: sha256=<HMAC-SHA256 do corpo>`, usando como chave o sha256 (em hexadecimal) do token do webhook. A resposta no formato do Discord (`{"content": "..."}`) vira mensagem do bot; resposta vazia (204) deixa o bot responder depois pelo próprio webhook. A API só chama endereços públicos (nada de `localhost` ou rede interna).
+`/dado`, `/moeda`, `/sortear`, `/escolher` e `/ajuda` já vêm prontos. Em **Configurações do servidor → Webhooks**, cada webhook pode ganhar comandos próprios e um endereço `https://` público: quando alguém usa o comando, a API faz um `POST` JSON (`{type, command, args, user, channel_id, server_id, message_id, timestamp}`) para esse endereço, com o cabeçalho `X-CDG-Signature: sha256=<HMAC-SHA256 do corpo>`, usando como chave o sha256 (em hexadecimal) do token do webhook. A resposta no formato do Discord (`{"content": "..."}`) vira mensagem do bot; resposta vazia (204) deixa o bot responder depois pelo próprio webhook. A API só chama endereços públicos (nada de `localhost` ou rede interna).
 
 ## 12. Backup
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter
@@ -16,10 +17,12 @@ router = APIRouter()
 
 MAX_LEN = 4000
 MAX_ATTACHMENTS = 10
+# mensagem que só quem digitou vê (comando de música e respostas dele) some depois disso
+EPHEMERAL_TTL = timedelta(hours=12)
 
 
 SELECT_MESSAGES = """
-    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name,
+    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name, m.visible_to, m.expires_at,
            u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name, u.bio AS u_bio,
            u.accent AS u_accent, u.status AS u_status, u.custom_status AS u_custom_status, u.pronouns AS u_pronouns,
            u.created_at AS u_created_at, u.avatar_id AS u_avatar_id, av.animated AS u_avatar_animated,
@@ -88,6 +91,8 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
                 "reactions": by_msg.get(r["id"], []),
                 "edited_at": r["edited_at"].isoformat() if r["edited_at"] else None,
                 "created_at": r["created_at"].isoformat(),
+                "ephemeral": r["visible_to"] is not None,
+                "expires_at": r["expires_at"].isoformat() if r["expires_at"] else None,
             }
         )
     return out
@@ -102,16 +107,27 @@ def bot_author(webhook_id: int, name: str, created_at: Any) -> dict:
     }
 
 
-async def post_webhook_message(channel_id: int, webhook_id: int, name: str, content: str) -> dict:
+async def emit(channel_id: int, visible_to: int | None, event: str, data: Any) -> None:
+    """Manda o evento de uma mensagem: para o canal todo, ou só para quem pode ver (mensagem só sua)."""
+    if visible_to is not None:
+        await hub.send([visible_to], event, data)
+    else:
+        await hub.to_channel(channel_id, event, data)
+
+
+async def post_webhook_message(channel_id: int, webhook_id: int, name: str, content: str, *, visible_to: int | None = None) -> dict:
     mid = new_id()
+    expires = datetime.now(timezone.utc) + EPHEMERAL_TTL if visible_to is not None else None
     await pool().execute(
-        "INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name) VALUES ($1,$2,NULL,$3,'default',$4,$5)",
-        mid, channel_id, content, webhook_id, name,
+        """INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name, visible_to, expires_at)
+           VALUES ($1,$2,NULL,$3,'default',$4,$5,$6,$7)""",
+        mid, channel_id, content, webhook_id, name, visible_to, expires,
     )
-    await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)
-    msg = await message_by_id(mid, 0)
+    if visible_to is None:
+        await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)
+    msg = await message_by_id(mid, visible_to or 0)
     assert msg
-    await hub.to_channel(channel_id, "message_create", msg)
+    await emit(channel_id, visible_to, "message_create", msg)
     return msg
 
 
@@ -126,14 +142,19 @@ async def message_by_id(mid: int, viewer: int) -> dict | None:
 
 
 async def post_message(
-    channel_id: int, author_id: int, content: str, *, kind: str = "default", attachments: list | None = None, reply_to: int | None = None
+    channel_id: int, author_id: int, content: str, *, kind: str = "default", attachments: list | None = None, reply_to: int | None = None,
+    private: bool = False,
 ) -> dict:
     mid = new_id()
+    visible_to = author_id if private else None
+    expires = datetime.now(timezone.utc) + EPHEMERAL_TTL if private else None
     await pool().execute(
-        "INSERT INTO messages (id, channel_id, author_id, content, kind, attachments, reply_to) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-        mid, channel_id, author_id, content, kind, json.dumps(attachments or []), reply_to,
+        """INSERT INTO messages (id, channel_id, author_id, content, kind, attachments, reply_to, visible_to, expires_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+        mid, channel_id, author_id, content, kind, json.dumps(attachments or []), reply_to, visible_to, expires,
     )
-    await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)
+    if not private:
+        await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)
     await pool().execute(
         """INSERT INTO read_states (user_id, channel_id, last_read_id) VALUES ($1, $2, $3)
            ON CONFLICT (user_id, channel_id) DO UPDATE SET last_read_id = EXCLUDED.last_read_id""",
@@ -141,7 +162,7 @@ async def post_message(
     )
     msg = await message_by_id(mid, author_id)
     assert msg
-    await hub.to_channel(channel_id, "message_create", msg)
+    await emit(channel_id, visible_to, "message_create", msg)
     return msg
 
 
@@ -158,8 +179,10 @@ async def list_messages(channel_id: str, before: str | None = None, limit: int =
     await require_channel(me.id, cid)
     limit = max(1, min(100, limit))
     if before:
-        return await fetch_messages("m.channel_id = $1 AND m.id < $2", cid, parse_id(before), viewer=me.id, limit=limit)
-    return await fetch_messages("m.channel_id = $1", cid, viewer=me.id, limit=limit)
+        return await fetch_messages(
+            "m.channel_id = $1 AND m.id < $2 AND (m.visible_to IS NULL OR m.visible_to = $3)", cid, parse_id(before), me.id, viewer=me.id, limit=limit
+        )
+    return await fetch_messages("m.channel_id = $1 AND (m.visible_to IS NULL OR m.visible_to = $2)", cid, me.id, viewer=me.id, limit=limit)
 
 
 class MessageIn(BaseModel):
@@ -176,6 +199,8 @@ class MessageIn(BaseModel):
 async def create_message(channel_id: str, body: MessageIn, me: Auth = CurrentUser) -> dict:
     cid = parse_id(channel_id)
     ch = await require_channel(me.id, cid)
+    if not ch.get("can_send", True):
+        raise err(403, "Só alguns cargos podem escrever neste canal.")
     content = body.content.strip()
     if len(content) > MAX_LEN:
         raise err(400, f"Mensagem longa demais (máximo {MAX_LEN} caracteres).")
@@ -225,14 +250,22 @@ async def create_message(channel_id: str, body: MessageIn, me: Auth = CurrentUse
         reply = parse_id(body.reply_to)
         if not await pool().fetchval("SELECT 1 FROM messages WHERE id = $1 AND channel_id = $2", reply, cid):
             reply = None
-    msg = await post_message(cid, me.id, content, attachments=attachments, reply_to=reply)
-    if content.startswith("/") and ch["type"] in ("text", "dm"):
-        from .comandos import run_command  # aqui para não dar ciclo
+    from .comandos import is_private_command, run_command  # aqui para não dar ciclo
+    from .bots import on_message
 
-        task = asyncio.create_task(run_command(ch, me.id, content, msg["id"]))
-        _command_tasks.add(task)
-        task.add_done_callback(_command_tasks.discard)
+    private = ch["type"] in ("text", "dm") and is_private_command(content)
+    msg = await post_message(cid, me.id, content, attachments=attachments, reply_to=None if private else reply, private=private)
+    if content.startswith("/") and ch["type"] in ("text", "dm"):
+        _spawn(run_command(ch, me.id, content, msg["id"]))
+    elif ch["type"] == "text" and ch.get("server_id") is not None and content:
+        _spawn(on_message(ch, me.id, content, int(msg["id"])))
     return msg
+
+
+def _spawn(coro: Any) -> None:
+    task = asyncio.create_task(coro)
+    _command_tasks.add(task)
+    task.add_done_callback(_command_tasks.discard)
 
 
 _command_tasks: set[asyncio.Task] = set()
@@ -243,8 +276,8 @@ class EditIn(BaseModel):
 
 
 async def _own_message(mid: int, user_id: int) -> Any:
-    row = await pool().fetchrow("SELECT id, channel_id, author_id FROM messages WHERE id = $1", mid)
-    if not row or not await can_access_channel(user_id, row["channel_id"]):
+    row = await pool().fetchrow("SELECT id, channel_id, author_id, visible_to FROM messages WHERE id = $1", mid)
+    if not row or not await can_access_channel(user_id, row["channel_id"]) or (row["visible_to"] is not None and row["visible_to"] != user_id):
         raise err(404, "Mensagem não encontrada.")
     return row
 
@@ -260,7 +293,7 @@ async def edit_message(message_id: str, body: EditIn, me: Auth = CurrentUser) ->
         raise err(400, "Mensagem vazia ou longa demais.")
     await pool().execute("UPDATE messages SET content = $1, edited_at = now() WHERE id = $2", content, mid)
     msg = await message_by_id(mid, me.id)
-    await hub.to_channel(row["channel_id"], "message_update", msg)
+    await emit(row["channel_id"], row["visible_to"], "message_update", msg)
     return msg  # type: ignore[return-value]
 
 
@@ -268,13 +301,13 @@ async def edit_message(message_id: str, body: EditIn, me: Auth = CurrentUser) ->
 async def delete_message(message_id: str, me: Auth = CurrentUser) -> dict:
     mid = parse_id(message_id)
     row = await _own_message(mid, me.id)
-    if row["author_id"] != me.id:
+    if row["author_id"] != me.id and row["visible_to"] != me.id:
         server_id = await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", row["channel_id"])
         role = await pool().fetchval("SELECT role FROM members WHERE server_id = $1 AND user_id = $2", server_id, me.id) if server_id else None
         if role not in ("admin", "owner"):
             raise err(403, "Você só pode apagar as suas mensagens.")
     await pool().execute("DELETE FROM messages WHERE id = $1", mid)
-    await hub.to_channel(row["channel_id"], "message_delete", {"id": sid(mid), "channel_id": sid(row["channel_id"])})
+    await emit(row["channel_id"], row["visible_to"], "message_delete", {"id": sid(mid), "channel_id": sid(row["channel_id"])})
     return {"ok": True}
 
 
@@ -330,3 +363,19 @@ async def mark_read(channel_id: str, body: ReadIn, me: Auth = CurrentUser) -> di
         me.id, cid, parse_id(body.message_id),
     )
     return {"ok": True}
+
+
+async def expire_loop() -> None:
+    """Apaga as mensagens só suas que passaram das 12 horas."""
+    while True:
+        try:
+            rows = await pool().fetch(
+                "DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < now() RETURNING id, channel_id, visible_to"
+            )
+            for r in rows:
+                await emit(r["channel_id"], r["visible_to"], "message_delete", {"id": sid(r["id"]), "channel_id": sid(r["channel_id"])})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await asyncio.sleep(300)

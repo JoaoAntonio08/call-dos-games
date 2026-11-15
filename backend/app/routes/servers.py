@@ -14,6 +14,7 @@ from ..core import (
     USER_COLUMNS, USER_JOINS, Auth, CurrentUser, err, file_url, media, new_id, parse_id, pool, sid, user_out,
 )
 from ..files import save_upload
+from ..perms import PERMS, RANK
 from ..realtime import hub
 
 router = APIRouter()
@@ -51,12 +52,16 @@ def channel_out(r: Any) -> dict:
         "topic": r["topic"],
         "position": r["position"],
         "last_message_id": sid(r["last_message_id"]),
+        "view_roles": [sid(x) for x in (r["view_roles"] or [])],
+        "send_roles": [sid(x) for x in (r["send_roles"] or [])],
     }
 
 
 async def member_rows(server_id: int) -> list[dict]:
     rows = await pool().fetch(
-        f"""SELECT {USER_COLUMNS}, m.role, m.nickname, m.joined_at FROM members m
+        f"""SELECT {USER_COLUMNS}, m.role, m.nickname, m.joined_at,
+                   ARRAY(SELECT mr.role_id FROM member_roles mr WHERE mr.server_id = m.server_id AND mr.user_id = m.user_id) AS role_ids
+            FROM members m
             JOIN users u ON u.id = m.user_id {USER_JOINS}
             WHERE m.server_id = $1 ORDER BY m.joined_at""",
         server_id,
@@ -66,6 +71,7 @@ async def member_rows(server_id: int) -> list[dict]:
             "user": user_out(r, presence=hub.presence(r["id"], r["status"])),
             "role": r["role"],
             "nickname": r["nickname"],
+            "roles": [sid(x) for x in (r["role_ids"] or [])],
             "joined_at": r["joined_at"].isoformat(),
         }
         for r in rows
@@ -90,7 +96,13 @@ async def emojis_of(server_id: int) -> list[dict]:
     return [{"id": sid(r["id"]), "name": r["name"], "url": file_url(r["file_id"]), "animated": r["animated"]} for r in rows]
 
 
-async def server_out(server_id: int) -> dict:
+async def roles_of(server_id: int) -> list[dict]:
+    rows = await pool().fetch("SELECT * FROM roles WHERE server_id = $1 ORDER BY position, id", server_id)
+    return [{"id": sid(r["id"]), "name": r["name"], "color": r["color"], "position": r["position"], "perms": list(r["perms"] or [])} for r in rows]
+
+
+async def server_full(server_id: int) -> dict:
+    """O servidor inteiro, com todos os canais. Antes de mandar para alguém, passe por for_viewer."""
     s = await pool().fetchrow(
         """SELECT s.*, i.animated AS icon_animated, b.animated AS banner_animated FROM servers s
            LEFT JOIN files i ON i.id = s.icon_id LEFT JOIN files b ON b.id = s.banner_id WHERE s.id = $1""",
@@ -107,18 +119,45 @@ async def server_out(server_id: int) -> dict:
         "accent": s["accent"],
         "hall_threshold": s["hall_threshold"],
         "hype_cooldown": s["hype_cooldown"],
+        "everyone_perms": list(s["everyone_perms"] or []),
         "welcome_lines": list(s["welcome_lines"] or []),
         "icon": media(s["icon_id"], s["icon_animated"]),
         "banner": media(s["banner_id"], s["banner_animated"]),
         "channels": [channel_out(c) for c in channels],
+        "roles": await roles_of(server_id),
         "members": await member_rows(server_id),
         "sounds": await sounds_of(server_id),
         "emojis": await emojis_of(server_id),
     }
 
 
+def for_viewer(full: dict, viewer: int) -> dict:
+    """O que essa pessoa enxerga do servidor: some os canais restritos a cargos que ela não tem."""
+    me = next((m for m in full["members"] if m["user"]["id"] == sid(viewer)), None)
+    role = me["role"] if me else "member"
+    mine = set(me["roles"]) if me else set()
+    admin = RANK.get(role, 0) >= 1
+    if admin:
+        perms = list(PERMS)
+    else:
+        got = set(full["everyone_perms"])
+        for r in full["roles"]:
+            if r["id"] in mine:
+                got |= set(r["perms"])
+        perms = [p for p in PERMS if p in got]
+    channels = [c for c in full["channels"] if admin or not c["view_roles"] or mine & set(c["view_roles"])]
+    return {**full, "channels": channels, "my_perms": perms}
+
+
+async def server_out(server_id: int, viewer: int) -> dict:
+    return for_viewer(await server_full(server_id), viewer)
+
+
 async def announce_server(server_id: int) -> None:
-    await hub.to_server(server_id, "server_update", await server_out(server_id))
+    full = await server_full(server_id)
+    for m in full["members"]:
+        uid = int(m["user"]["id"])
+        await hub.send([uid], "server_update", for_viewer(full, uid))
 
 
 # ------------------------------------------------------------------ servidores
@@ -145,7 +184,7 @@ async def create_server(body: ServerIn, me: Auth = CurrentUser) -> dict:
                 "INSERT INTO channels (id, server_id, type, name, topic, position) VALUES ($1,$2,$3,$4,$5,$6)",
                 new_id(), server_id, kind, cname, topic, pos,
             )
-    out = await server_out(server_id)
+    out = await server_out(server_id, me.id)
     await hub.send([me.id], "server_create", out)
     return out
 
@@ -154,7 +193,7 @@ async def create_server(body: ServerIn, me: Auth = CurrentUser) -> dict:
 async def get_server(server_id: str, me: Auth = CurrentUser) -> dict:
     s = parse_id(server_id)
     await require_member(s, me.id)
-    return await server_out(s)
+    return await server_out(s, me.id)
 
 
 class ServerPatch(BaseModel):
@@ -164,6 +203,7 @@ class ServerPatch(BaseModel):
     hall_threshold: int | None = None
     welcome_lines: list[str] | None = None
     hype_cooldown: int | None = None
+    everyone_perms: list[str] | None = None
 
 
 HYPE_CHOICES = {0, 30, 60, 120, 300, 600, 1800}
@@ -191,11 +231,16 @@ async def update_server(server_id: str, body: ServerPatch, me: Auth = CurrentUse
         if body.hype_cooldown not in HYPE_CHOICES:
             raise err(400, "Tempo de hype inválido.")
         await pool().execute("UPDATE servers SET hype_cooldown = $1 WHERE id = $2", body.hype_cooldown, s)
+    if body.everyone_perms is not None:
+        bad = [p for p in body.everyone_perms if p not in PERMS]
+        if bad:
+            raise err(400, "Permissão desconhecida.")
+        await pool().execute("UPDATE servers SET everyone_perms = $1 WHERE id = $2", sorted(set(body.everyone_perms)), s)
     if body.welcome_lines is not None:
         lines = [x.strip()[:120] for x in body.welcome_lines if x.strip()][:12]
         await pool().execute("UPDATE servers SET welcome_lines = $1 WHERE id = $2", lines, s)
     await announce_server(s)
-    return await server_out(s)
+    return await server_out(s, me.id)
 
 
 @router.post("/servers/{server_id}/icon")
@@ -205,7 +250,7 @@ async def set_icon(server_id: str, file: UploadFile, me: Auth = CurrentUser) -> 
     saved = await save_upload(file, "icon", me.id)
     await pool().execute("UPDATE servers SET icon_id = $1 WHERE id = $2", int(saved["id"]), s)
     await announce_server(s)
-    return await server_out(s)
+    return await server_out(s, me.id)
 
 
 @router.post("/servers/{server_id}/banner")
@@ -215,7 +260,7 @@ async def set_server_banner(server_id: str, file: UploadFile, me: Auth = Current
     saved = await save_upload(file, "banner", me.id)
     await pool().execute("UPDATE servers SET banner_id = $1 WHERE id = $2", int(saved["id"]), s)
     await announce_server(s)
-    return await server_out(s)
+    return await server_out(s, me.id)
 
 
 @router.delete("/servers/{server_id}")
@@ -258,8 +303,17 @@ async def update_member(server_id: str, user_id: str, body: MemberPatch, me: Aut
     s, target = parse_id(server_id), parse_id(user_id)
     my_role = await require_member(s, me.id)
     if body.nickname is not None:
-        if target != me.id and ROLE_RANK[my_role] < 1:
-            raise err(403, "Você só pode trocar o seu apelido.")
+        if target != me.id:
+            from ..perms import member as perms_member  # noqa: PLC0415
+
+            who = await perms_member(s, me.id)
+            if not who or not who.can("apelidos"):
+                raise err(403, "Você só pode trocar o seu apelido.")
+            target_role = await role_in(s, target)
+            if not target_role:
+                raise err(404, "Essa pessoa não está no servidor.")
+            if target_role == "owner" and my_role != "owner":
+                raise err(403, "Só o dono muda o próprio apelido.")
         await pool().execute("UPDATE members SET nickname = $1 WHERE server_id = $2 AND user_id = $3", body.nickname.strip()[:32], s, target)
     if body.role is not None:
         if my_role != "owner":
@@ -277,6 +331,118 @@ async def update_member(server_id: str, user_id: str, body: MemberPatch, me: Aut
             await pool().execute("UPDATE members SET role = $1 WHERE server_id = $2 AND user_id = $3", body.role, s, target)
     await announce_server(s)
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ cargos
+
+async def _role_ids(server_id: int, raw: list[str]) -> list[int]:
+    ids = sorted({parse_id(x) for x in raw})
+    if ids:
+        ok = await pool().fetchval("SELECT count(*) FROM roles WHERE server_id = $1 AND id = ANY($2::bigint[])", server_id, ids)
+        if ok != len(ids):
+            raise err(400, "Cargo não encontrado.")
+    return ids
+
+
+class RoleIn(BaseModel):
+    name: str | None = None
+    color: str | None = None
+    perms: list[str] | None = None
+    position: int | None = None
+
+
+def _clean_perms(perms: list[str]) -> list[str]:
+    if any(p not in PERMS for p in perms):
+        raise err(400, "Permissão desconhecida.")
+    return sorted(set(perms))
+
+
+@router.post("/servers/{server_id}/roles")
+async def create_role(server_id: str, body: RoleIn, me: Auth = CurrentUser) -> dict:
+    s = parse_id(server_id)
+    await require_admin(s, me.id)
+    name = (body.name or "").strip()[:32]
+    if not name:
+        raise err(400, "Dê um nome para o cargo.")
+    if await pool().fetchval("SELECT count(*) FROM roles WHERE server_id = $1", s) >= 30:
+        raise err(400, "Limite de 30 cargos por servidor.")
+    color = (body.color or "").lower()
+    if color and not HEX_RE.match(color):
+        raise err(400, "Cor inválida.")
+    pos = await pool().fetchval("SELECT COALESCE(MAX(position), -1) + 1 FROM roles WHERE server_id = $1", s)
+    rid = new_id()
+    await pool().execute(
+        "INSERT INTO roles (id, server_id, name, color, position, perms) VALUES ($1,$2,$3,$4,$5,$6)",
+        rid, s, name, color, pos, _clean_perms(body.perms or []),
+    )
+    await announce_server(s)
+    return {"id": sid(rid)}
+
+
+async def _role(role_id: str, me: int) -> Any:
+    row = await pool().fetchrow("SELECT * FROM roles WHERE id = $1", parse_id(role_id))
+    if not row:
+        raise err(404, "Cargo não encontrado.")
+    await require_admin(row["server_id"], me)
+    return row
+
+
+@router.patch("/roles/{role_id}")
+async def update_role(role_id: str, body: RoleIn, me: Auth = CurrentUser) -> dict:
+    row = await _role(role_id, me.id)
+    if body.name is not None:
+        name = body.name.strip()[:32]
+        if not name:
+            raise err(400, "O nome não pode ficar vazio.")
+        await pool().execute("UPDATE roles SET name = $1 WHERE id = $2", name, row["id"])
+    if body.color is not None:
+        if body.color and not HEX_RE.match(body.color):
+            raise err(400, "Cor inválida.")
+        await pool().execute("UPDATE roles SET color = $1 WHERE id = $2", body.color.lower(), row["id"])
+    if body.perms is not None:
+        await pool().execute("UPDATE roles SET perms = $1 WHERE id = $2", _clean_perms(body.perms), row["id"])
+    if body.position is not None:
+        await pool().execute("UPDATE roles SET position = $1 WHERE id = $2", body.position, row["id"])
+    await announce_server(row["server_id"])
+    return {"ok": True}
+
+
+@router.delete("/roles/{role_id}")
+async def delete_role(role_id: str, me: Auth = CurrentUser) -> dict:
+    row = await _role(role_id, me.id)
+    async with pool().acquire() as con, con.transaction():
+        await con.execute("DELETE FROM roles WHERE id = $1", row["id"])
+        # canais restritos a esse cargo deixam de citar ele
+        await con.execute(
+            "UPDATE channels SET view_roles = array_remove(view_roles, $1), send_roles = array_remove(send_roles, $1) WHERE server_id = $2",
+            row["id"], row["server_id"],
+        )
+    await announce_server(row["server_id"])
+    return {"ok": True}
+
+
+class MemberRolesIn(BaseModel):
+    roles: list[str]
+
+
+@router.put("/servers/{server_id}/members/{user_id}/roles")
+async def set_member_roles(server_id: str, user_id: str, body: MemberRolesIn, me: Auth = CurrentUser) -> dict:
+    s, target = parse_id(server_id), parse_id(user_id)
+    await require_admin(s, me.id)
+    if not await role_in(s, target):
+        raise err(404, "Essa pessoa não está no servidor.")
+    ids = await _role_ids(s, body.roles)
+    async with pool().acquire() as con, con.transaction():
+        await con.execute("DELETE FROM member_roles WHERE server_id = $1 AND user_id = $2", s, target)
+        for rid in ids:
+            await con.execute("INSERT INTO member_roles (server_id, user_id, role_id) VALUES ($1,$2,$3)", s, target, rid)
+    await announce_server(s)
+    return {"ok": True}
+
+
+@router.get("/perms")
+async def perms_catalog() -> dict:
+    return {"perms": [{"key": k, "label": v} for k, v in PERMS.items()]}
 
 
 # ------------------------------------------------------------------ canais
@@ -315,6 +481,9 @@ class ChannelPatch(BaseModel):
     name: str | None = None
     topic: str | None = None
     position: int | None = None
+    view_roles: list[str] | None = None
+    send_roles: list[str] | None = None
+
 
 
 @router.patch("/channels/{channel_id}")
@@ -330,6 +499,10 @@ async def update_channel(channel_id: str, body: ChannelPatch, me: Auth = Current
         await pool().execute("UPDATE channels SET topic = $1 WHERE id = $2", body.topic.strip()[:200], cid)
     if body.position is not None:
         await pool().execute("UPDATE channels SET position = $1 WHERE id = $2", body.position, cid)
+    if body.view_roles is not None:
+        await pool().execute("UPDATE channels SET view_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.view_roles), cid)
+    if body.send_roles is not None:
+        await pool().execute("UPDATE channels SET send_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.send_roles), cid)
     await announce_server(ch["server_id"])
     return channel_out(await pool().fetchrow("SELECT * FROM channels WHERE id = $1", cid))
 
@@ -423,8 +596,11 @@ async def join_invite(code: str, me: Auth = CurrentUser) -> dict:
             from .messages import post_message  # import tardio: evita ciclo
 
             await post_message(first_text, me.id, "", kind="join")
+        from .bots import on_join  # import tardio: evita ciclo
+
+        await on_join(s, me.id)
         await announce_server(s)
-    out = await server_out(s)
+    out = await server_out(s, me.id)
     await hub.send([me.id], "server_create", out)
     return out
 

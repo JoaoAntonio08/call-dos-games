@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from ..core import Auth, CurrentUser, err, fetch_user, parse_id, pool, settings, sid, user_out
 from ..realtime import can_access_channel, hub
-from .servers import require_admin, require_member
+from .servers import require_member
 
 router = APIRouter()
 
@@ -66,8 +66,13 @@ async def apply_permissions(channel_id: int, user_id: int, mods: dict[str, Any])
 
 # ------------------------------------------------------------------ quem pode mexer em quem
 async def _server_voice_target(server_id: int, user_id: int, me: int) -> int | None:
-    """Confere que eu sou admin e o alvo é do servidor. Devolve o canal de voz do servidor onde o alvo está (ou None)."""
-    await require_admin(server_id, me)
+    """Confere que eu posso moderar a voz (admin ou cargo) e o alvo é do servidor. Devolve o canal de voz do servidor onde o alvo está (ou None)."""
+    from ..perms import RANK, require_perm
+
+    await require_perm(server_id, me, "moderar_voz", "Seu cargo não pode moderar a call.")
+    roles = {r["user_id"]: r["role"] for r in await pool().fetch("SELECT user_id, role FROM members WHERE server_id = $1 AND user_id = ANY($2::bigint[])", server_id, [me, user_id])}
+    if user_id != me and RANK.get(roles.get(user_id, "member"), 0) > RANK.get(roles.get(me, "member"), 0):
+        raise err(403, "Você não pode moderar alguém acima de você.")
     if not await pool().fetchval("SELECT 1 FROM members WHERE server_id = $1 AND user_id = $2", server_id, user_id):
         raise err(404, "Essa pessoa não está no servidor.")
     cid = hub.user_voice.get(user_id)
@@ -153,6 +158,9 @@ async def hype(channel_id: str, me: Auth = CurrentUser) -> dict:
         raise err(404, "Canal de voz não encontrado.")
     s = ch["server_id"]
     await require_member(s, me.id)
+    from ..perms import require_perm
+
+    await require_perm(s, me.id, "hype", "Seu cargo não pode chamar a turma.")
     cooldown = await pool().fetchval("SELECT hype_cooldown FROM servers WHERE id = $1", s)
     if not cooldown:
         raise err(403, "O hype está desligado neste servidor.")

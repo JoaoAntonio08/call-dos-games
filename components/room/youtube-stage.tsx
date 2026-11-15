@@ -156,6 +156,12 @@ export function YouTubeStage({ yt }: { yt: YouTubeSync }) {
   const title = (ready && p?.getVideoData?.()?.title) || "";
 
   const fullscreen = () => (document.fullscreenElement ? document.exitFullscreen() : box.current?.requestFullscreen());
+  // só quem pôs a música (ou DJ/admin) pausa, pula e mexe no tempo; os outros votam para pular
+  const can = yt.canControl;
+  const owner = state.ownerName ?? state.byName;
+  const toggle = () => {
+    if (can) return state.playing ? yt.pause() : yt.play();
+  };
 
   return (
     <div ref={box} className="flex size-full flex-col bg-ink text-paper">
@@ -164,9 +170,10 @@ export function YouTubeStage({ yt }: { yt: YouTubeSync }) {
         {/* camada que recebe o clique, para ninguém mexer no player sem sincronizar */}
         <button
           type="button"
-          aria-label={state.playing ? "Pausar para todos" : "Dar play para todos"}
-          className="absolute inset-0 cursor-pointer"
-          onClick={() => (state.playing ? yt.pause() : yt.play())}
+          aria-label={can ? (state.playing ? "Pausar para todos" : "Dar play para todos") : `Só ${owner} controla este vídeo`}
+          title={can ? undefined : `Só ${owner} (ou um DJ) pausa este vídeo`}
+          className={`absolute inset-0 ${can ? "cursor-pointer" : "cursor-default"}`}
+          onClick={toggle}
           onDoubleClick={fullscreen}
         />
         {err && (
@@ -184,7 +191,7 @@ export function YouTubeStage({ yt }: { yt: YouTubeSync }) {
         max={duration || 1}
         step={0.5}
         value={Math.min(now, duration || 1)}
-        disabled={!duration}
+        disabled={!duration || !can}
         onChange={(e) => setScrub(Number(e.target.value))}
         onPointerUp={() => {
           if (scrub !== null) yt.seek(scrub);
@@ -200,8 +207,10 @@ export function YouTubeStage({ yt }: { yt: YouTubeSync }) {
       <div className="flex h-10 shrink-0 items-center gap-4">
         <button
           type="button"
-          onClick={() => (state.playing ? yt.pause() : yt.play())}
-          className="press grid size-8 shrink-0 place-items-center bg-paper text-ink hover:bg-signal"
+          onClick={toggle}
+          disabled={!can}
+          title={can ? undefined : `Só ${owner} (ou um DJ) pausa`}
+          className="press grid size-8 shrink-0 place-items-center bg-paper text-ink hover:bg-signal disabled:opacity-40 disabled:hover:bg-paper"
           aria-label={state.playing ? "Pausar para todos" : "Dar play para todos"}
         >
           {state.playing ? <Pause className="size-3.5" fill="currentColor" /> : <Play className="size-3.5 translate-x-px" fill="currentColor" />}
@@ -210,7 +219,7 @@ export function YouTubeStage({ yt }: { yt: YouTubeSync }) {
           {fmt(now)} / {fmt(duration)}
         </span>
         <span className="label hidden min-w-0 truncate text-paper/50 md:block">
-          {title || "YouTube"} — posto por {state.byName}
+          {title || "YouTube"} — de {owner}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-4">
           <label className="hidden items-center gap-2 sm:flex">
@@ -228,15 +237,25 @@ export function YouTubeStage({ yt }: { yt: YouTubeSync }) {
               aria-label="Volume do vídeo (só para você)"
             />
           </label>
+          <button
+            type="button"
+            onClick={yt.skip}
+            className="label link-u"
+            title={can ? "Pular para a próxima da fila" : "Votar para pular (mais da metade da call pula)"}
+          >
+            {can ? "Pular ⏭" : `Votar p/ pular${yt.votes ? ` (${yt.votes})` : ""}`}
+          </button>
           <button type="button" onClick={yt.resync} className="label link-u" title="Ressincronizar com a turma">
             Sincronizar
           </button>
           <button type="button" onClick={fullscreen} className="label link-u" aria-label={full ? "Sair da tela cheia" : "Tela cheia"}>
             {full ? "Sair ⤡" : "Tela cheia ⤢"}
           </button>
-          <button type="button" onClick={yt.stop} className="label link-u text-signal" title="Fechar o vídeo para todos">
-            Fechar ×
-          </button>
+          {can && (
+            <button type="button" onClick={yt.stop} className="label link-u text-signal" title="Fechar o vídeo para todos">
+              Fechar ×
+            </button>
+          )}
         </span>
       </div>
     </div>

@@ -45,6 +45,8 @@ class Settings:
     # opcionais: busca de GIFs (developers.giphy.com) e "jogando agora" da Steam (steamcommunity.com/dev/apikey)
     giphy_key = env("GIPHY_API_KEY")
     steam_key = env("STEAM_API_KEY")
+    # opcional: /tocar pelo nome da música (console.cloud.google.com, YouTube Data API v3)
+    youtube_key = env("YOUTUBE_API_KEY")
 
 
 settings = Settings()

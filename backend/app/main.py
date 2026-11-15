@@ -29,15 +29,20 @@ from .routes.users import router as users_router
 from .routes.voz import router as voz_router
 from .routes.extras2 import router as extras2_router, steam_loop
 from .routes.comandos import router as comandos_router
+from .routes.bots import router as bots_router, reminder_loop
+from .routes.messages import expire_loop
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await connect_db()
     loop = asyncio.create_task(steam_loop()) if settings.steam_key else None
+    chores = [asyncio.create_task(expire_loop()), asyncio.create_task(reminder_loop())]
     yield
     if loop:
         loop.cancel()
+    for t in chores:
+        t.cancel()
     await close_db()
 
 
@@ -89,5 +94,5 @@ async def health() -> dict:
     return {"ok": True}
 
 
-for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router):
+for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router, bots_router):
     app.include_router(r)

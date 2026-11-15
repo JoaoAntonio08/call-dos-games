@@ -66,14 +66,61 @@ async def server_bots(server_id: int | None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+MODULE_HELP: dict[str, str] = {
+    "tocar": "Põe uma música na fila da sua call: /tocar nome ou link",
+    "fila": "Mostra a fila de músicas da sua call",
+    "pular": "Pula a música (a sua) ou vota para pular",
+    "enquete": "Enquete: /enquete pergunta | opção 1 | opção 2",
+}
+
+
+def resolve(name: str) -> str:
+    from .bots import ALIASES
+
+    return ALIASES.get(name, name)
+
+
+def is_private_command(content: str) -> bool:
+    """Comando de música e /ajuda: só quem digitou vê (e some em 12 h)."""
+    parsed = parse_command(content)
+    return bool(parsed) and resolve(parsed[0]) in ("tocar", "fila", "pular", "ajuda")
+
+
+async def gate(name: str, ch: dict, user_id: int) -> tuple[Any, Any, str | None]:
+    """(módulo ativo, quem é a pessoa, motivo de não poder). Módulo None = não é comando de módulo."""
+    from ..perms import member as perms_member
+    from .bots import COMMAND_MODULE, active
+
+    key = COMMAND_MODULE.get(name)
+    if not key:
+        return None, None, None
+    mod = await active(ch.get("server_id"), key)
+    who = await perms_member(ch["server_id"], user_id) if ch.get("server_id") is not None else None
+    if not mod:
+        return None, who, f"/{name} está desligado neste servidor."
+    if not mod.in_channel(ch["id"]):
+        return mod, who, f"/{name} não funciona neste canal."
+    if ch.get("server_id") is not None:
+        perm = "musica" if key == "musica" else "comandos"
+        if not (who and who.can(perm)) or not mod.allows(who):
+            return mod, who, f"Seu cargo não pode usar /{name} aqui."
+    return mod, who, None
+
+
 @router.get("/channels/{channel_id}/commands")
 async def list_commands(channel_id: str, me: Auth = CurrentUser) -> list[dict]:
     """Para o autocompletar do chat."""
+    from .bots import COMMAND_MODULE
+
     ch = await can_access_channel(me.id, parse_id(channel_id))
     if not ch:
         raise err(404, "Canal não encontrado.")
-    out = [{"name": n, "description": d, "bot": HOUSE_BOT_NAME} for n, d in BUILTIN.items()]
-    taken = set(BUILTIN)
+    out = [{"name": "ajuda", "description": BUILTIN["ajuda"], "bot": HOUSE_BOT_NAME}]
+    for n in COMMAND_MODULE:
+        mod, _who, why = await gate(n, ch, me.id)
+        if mod and not why:
+            out.append({"name": n, "description": BUILTIN.get(n) or MODULE_HELP.get(n, ""), "bot": mod.bot_name})
+    taken = set(BUILTIN) | set(COMMAND_MODULE)
     for b in await server_bots(ch.get("server_id")):
         for c in b["commands"]:
             if c not in taken:
@@ -212,25 +259,56 @@ async def run_command(ch: dict, user_id: int, content: str, message_id: str) -> 
     if len(q) >= 10:
         return  # comando demais em pouco tempo: ignora calado
     q.append(now)
+    from .bots import COMMAND_MODULE
     from .messages import post_webhook_message  # aqui para não dar ciclo
+    from .musica import music_command
 
+    name = resolve(name)
     me_name = await pool().fetchval("SELECT display_name FROM users WHERE id = $1", user_id) or "Alguém"
     try:
         if name == "ajuda":
-            bots = await server_bots(ch.get("server_id"))
-            lines = [f"/{n}: {d}" for n, d in BUILTIN.items() if n != "ajuda"]
-            for b in bots:
-                lines += [f"/{c}: bot {b['name']}" for c in b["commands"] if c not in BUILTIN]
-            await post_webhook_message(ch["id"], HOUSE_BOT_ID, HOUSE_BOT_NAME, "Comandos deste canal:\n" + "\n".join(lines))
+            lines = []
+            for n in COMMAND_MODULE:
+                mod, _who, why = await gate(n, ch, user_id)
+                if mod and not why:
+                    lines.append(f"/{n}: {BUILTIN.get(n) or MODULE_HELP.get(n, '')}")
+            for b in await server_bots(ch.get("server_id")):
+                lines += [f"/{c}: bot {b['name']}" for c in b["commands"] if c not in BUILTIN and c not in COMMAND_MODULE]
+            text = "Comandos deste canal:\n" + "\n".join(lines) if lines else "Nenhum comando liberado neste canal."
+            await post_webhook_message(ch["id"], HOUSE_BOT_ID, HOUSE_BOT_NAME, text, visible_to=user_id)
             return
-        if name in BUILTIN:
-            text = await builtin_reply(name, args, ch, user_id, me_name)
+        if name in COMMAND_MODULE:
+            mod, who, why = await gate(name, ch, user_id)
+            private = COMMAND_MODULE[name] == "musica"
+            if why:
+                await post_webhook_message(ch["id"], HOUSE_BOT_ID, HOUSE_BOT_NAME, "🔒 " + why, visible_to=user_id)
+                return
+            if COMMAND_MODULE[name] == "musica":
+                text = await music_command(name, args, ch, user_id, who)
+            elif name == "enquete":
+                parts = [p.strip()[:120] for p in args.split("|") if p.strip()]
+                if len(parts) < 3:
+                    text = "📊 Use assim: /enquete pergunta | opção 1 | opção 2 (até 10 opções)"
+                    private = True
+                else:
+                    nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+                    opts = "\n".join(f"{nums[i]} {o}" for i, o in enumerate(parts[1:11]))
+                    text = f"📊 **{parts[0]}**\n{opts}\nVote reagindo com o número. (enquete de {me_name})"
+            else:
+                text = await builtin_reply(name, args, ch, user_id, me_name)
             if text:
-                await post_webhook_message(ch["id"], HOUSE_BOT_ID, HOUSE_BOT_NAME, text)
+                await post_webhook_message(ch["id"], mod.bot_id, mod.bot_name, text, visible_to=user_id if private else None)
             return
         bot = next((b for b in await server_bots(ch.get("server_id")) if name in b["commands"]), None)
         if not bot:
             return  # não é comando de ninguém: fica só a mensagem
+        if ch.get("server_id") is not None:
+            from ..perms import member as perms_member
+
+            who = await perms_member(ch["server_id"], user_id)
+            if not (who and who.can("comandos")):
+                await post_webhook_message(ch["id"], HOUSE_BOT_ID, HOUSE_BOT_NAME, "🔒 Seu cargo não pode usar comandos de bot aqui.", visible_to=user_id)
+                return
         text, as_name = await call_bot(bot, name, args, ch, user_id, me_name, message_id)
         if text:
             wid = HOUSE_BOT_ID if as_name == HOUSE_BOT_NAME else bot["id"]
@@ -264,7 +342,7 @@ async def set_bot_commands(webhook_id: str, body: BotCommandsIn, me: Auth = Curr
             continue
         if not NAME_RE.match(c):
             raise err(400, f"Comando inválido: {c} (use letras minúsculas, números, - ou _).")
-        if c in BUILTIN:
+        if c in BUILTIN or c in MODULE_HELP or c in ("play", "p", "skip", "queue", "poll"):
             raise err(400, f"/{c} já é um comando da casa.")
         if c not in names:
             names.append(c)

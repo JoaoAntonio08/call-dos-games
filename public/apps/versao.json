@@ -1,11 +1,11 @@
 {
   "windows": {
-    "versao": "1.2.0",
-    "url": "https://github.com/JoaoAntonio08/call-dos-games/releases/download/v1.3.0/Call-dos-Games-Setup-1.2.0.exe"
+    "versao": "1.3.0",
+    "url": "https://github.com/JoaoAntonio08/call-dos-games/releases/download/v1.4.0/Call-dos-Games-Setup-1.3.0.exe"
   },
   "android": {
     "versao": "1.2.0",
     "url": "https://github.com/JoaoAntonio08/call-dos-games/releases/download/v1.2.0/Call-dos-Games-1.2.0.apk"
   },
-  "notas": "clipe sem live, jogo aberto no PC aparece para a turma e Alt+Shift+C clipa com o jogo na frente"
+  "notas": "música com /tocar, cargos, bots sem código, apelidos e abrir conversa sem cair da call"
 }

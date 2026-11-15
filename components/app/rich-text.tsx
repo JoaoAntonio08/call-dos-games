@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import Link from "next/link";
 import type { CustomEmoji } from "@/lib/types";
 
 /*
@@ -12,6 +13,36 @@ import type { CustomEmoji } from "@/lib/types";
 type Ctx = { emojis: CustomEmoji[]; meUsername?: string; onMention?: (username: string, el: HTMLElement) => void };
 
 const URL_RE = /https?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/;
+
+const LINK_CLASS = "text-ember-2 underline decoration-ember/40 underline-offset-2 hover:decoration-ember";
+
+/** Link do próprio app (canal, conversa, convite) navega aqui dentro: não recarrega a página nem derruba a call. */
+function internalPath(url: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const u = new URL(url);
+    if (u.origin !== window.location.origin) return null;
+    return /^\/app(\/|$)/.test(u.pathname) ? u.pathname + u.search + u.hash : null;
+  } catch {
+    return null;
+  }
+}
+
+function ChatLink({ url }: { url: string }) {
+  const path = internalPath(url);
+  if (path) {
+    return (
+      <Link href={path} className={LINK_CLASS}>
+        {url}
+      </Link>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer nofollow" className={LINK_CLASS}>
+      {url}
+    </a>
+  );
+}
 
 function Spoiler({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -27,11 +58,7 @@ const INLINE: { re: RegExp; render: (m: RegExpExecArray, ctx: Ctx, key: string) 
   { re: /`([^`\n]+)`/, render: (m, _c, k) => <code key={k} className="rounded-[5px] bg-cocoa-0 px-1.5 py-0.5 text-[0.88em] text-oat-2">{m[1]}</code> },
   {
     re: URL_RE,
-    render: (m, _c, k) => (
-      <a key={k} href={m[0]} target="_blank" rel="noopener noreferrer nofollow" className="text-ember-2 underline decoration-ember/40 underline-offset-2 hover:decoration-ember">
-        {m[0]}
-      </a>
-    ),
+    render: (m, _c, k) => <ChatLink key={k} url={m[0]} />,
   },
   { re: /\|\|(.+?)\|\|/, render: (m, c, k) => <Spoiler key={k}>{inline(m[1], c, k)}</Spoiler> },
   { re: /\*\*(.+?)\*\*/, render: (m, c, k) => <strong key={k} className="font-semibold text-oat">{inline(m[1], c, k)}</strong> },

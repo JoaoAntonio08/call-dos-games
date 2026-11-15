@@ -70,7 +70,13 @@ class Hub:
         if not row:
             return
         if row["server_id"] is not None:
-            await self.to_server(row["server_id"], event, data)
+            from .perms import channel_viewers  # noqa: PLC0415
+
+            viewers = await channel_viewers(channel_id)
+            if viewers is None:
+                await self.to_server(row["server_id"], event, data)
+            else:
+                await self.send(viewers, event, data)
         else:
             rows = await pool().fetch("SELECT user_id FROM dm_participants WHERE channel_id = $1", channel_id)
             await self.send((r["user_id"] for r in rows), event, data)
@@ -167,9 +173,17 @@ hub = Hub()
 async def can_access_channel(user_id: int, channel_id: int) -> dict | None:
     row = await pool().fetchrow(
         """
-        SELECT c.id, c.server_id, c.type, c.name FROM channels c
+        SELECT c.id, c.server_id, c.type, c.name, c.send_roles,
+               (c.server_id IS NULL OR cardinality(c.send_roles) = 0
+                OR EXISTS (SELECT 1 FROM members m WHERE m.server_id = c.server_id AND m.user_id = $2 AND m.role IN ('owner', 'admin'))
+                OR EXISTS (SELECT 1 FROM member_roles mr WHERE mr.server_id = c.server_id AND mr.user_id = $2 AND mr.role_id = ANY(c.send_roles))
+               ) AS can_send
+        FROM channels c
         WHERE c.id = $1 AND (
-            (c.server_id IS NOT NULL AND EXISTS (SELECT 1 FROM members m WHERE m.server_id = c.server_id AND m.user_id = $2))
+            (c.server_id IS NOT NULL AND EXISTS (SELECT 1 FROM members m WHERE m.server_id = c.server_id AND m.user_id = $2)
+             AND (cardinality(c.view_roles) = 0
+                  OR EXISTS (SELECT 1 FROM members m WHERE m.server_id = c.server_id AND m.user_id = $2 AND m.role IN ('owner', 'admin'))
+                  OR EXISTS (SELECT 1 FROM member_roles mr WHERE mr.server_id = c.server_id AND mr.user_id = $2 AND mr.role_id = ANY(c.view_roles))))
             OR (c.server_id IS NULL AND EXISTS (SELECT 1 FROM dm_participants d WHERE d.channel_id = c.id AND d.user_id = $2))
         )
         """,

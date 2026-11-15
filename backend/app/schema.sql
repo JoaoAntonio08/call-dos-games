@@ -257,3 +257,44 @@ ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS command_url TEXT NOT NULL DEFAULT 
 ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS commands TEXT[] NOT NULL DEFAULT '{}';
 -- hype: de quanto em quanto tempo dá para chamar a turma (0 = desligado)
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS hype_cooldown INT NOT NULL DEFAULT 120;
+
+-- ------------------------------------------------------------------ cargos e permissões
+-- cargos próprios do servidor (além de dono/admin/membro); perms é a lista de coisas liberadas
+CREATE TABLE IF NOT EXISTS roles (
+    id         BIGINT PRIMARY KEY,
+    server_id  BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT '',
+    position   INT NOT NULL DEFAULT 0,
+    perms      TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS roles_server ON roles (server_id);
+CREATE TABLE IF NOT EXISTS member_roles (
+    server_id BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id   BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+);
+CREATE INDEX IF NOT EXISTS member_roles_server ON member_roles (server_id, user_id);
+-- o que todo mundo do servidor pode, sem cargo nenhum
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS everyone_perms TEXT[] NOT NULL DEFAULT '{musica,comandos,hype}';
+-- canal restrito: só esses cargos veem / escrevem (ou falam, no canal de voz). Vazio = todo mundo
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS view_roles BIGINT[] NOT NULL DEFAULT '{}';
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS send_roles BIGINT[] NOT NULL DEFAULT '{}';
+
+-- ------------------------------------------------------------------ mensagens que só quem digitou vê (somem sozinhas)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS visible_to BIGINT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS messages_expires ON messages (expires_at) WHERE expires_at IS NOT NULL;
+
+-- ------------------------------------------------------------------ bots montados sem código
+CREATE TABLE IF NOT EXISTS server_bots (
+    id         BIGINT PRIMARY KEY,
+    server_id  BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT '#5865f2',
+    modules    JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS server_bots_server ON server_bots (server_id);

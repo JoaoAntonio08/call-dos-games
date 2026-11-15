@@ -145,6 +145,8 @@ interface VoiceCtx {
   /** fila de vídeos do canal da call */
   queue: QueueItem[];
   playQueued: (item: QueueItem) => Promise<void>;
+  /** pode pausar/pular a música dos outros e tirar qualquer uma da fila */
+  isDj: boolean;
   /** clipar momento */
   clip: {
     available: boolean;
@@ -172,9 +174,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   // fim do vídeo: se tiver fila, o próximo entra sozinho (a função de verdade é definida mais abaixo)
   const endedRef = useRef<() => boolean>(() => false);
   const onEnded = useCallback(() => endedRef.current(), []);
-  const yt = useYouTubeSync(call.room, call.flash, onEnded);
   const me = useStore((s) => s.me);
   const [channelId, setChannelId] = useState<string | null>(null);
+  // DJ: pausa e pula a música dos outros (admin, dono, cargo com DJ; numa conversa direta, todo mundo)
+  const isDj = useStore((s) => {
+    if (!channelId) return false;
+    const srv = Object.values(s.servers).find((x) => x.channels.some((c) => c.id === channelId));
+    return !srv || !!srv.my_perms?.includes("dj");
+  });
+  const yt = useYouTubeSync(call.room, call.flash, onEnded, isDj);
   const [joining, setJoining] = useState<string | null>(null);
   const [deaf, setDeafState] = useState(false);
   const [prefs, setPrefsState] = useState<VoicePrefs>(DEFAULT_PREFS);
@@ -521,9 +529,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const playQueued = useCallback(
     async (item: QueueItem) => {
       if (!channelId) return;
-      ytLoad(`https://www.youtube.com/watch?v=${item.video_id}&t=${item.start}s`);
+      // a música continua sendo de quem pôs na fila (é essa pessoa que pausa e pula)
+      const owner = item.added_by ? { id: item.added_by, name: useStore.getState().users[item.added_by]?.display_name ?? "Alguém" } : undefined;
+      ytLoad(`https://www.youtube.com/watch?v=${item.video_id}&t=${item.start}s`, owner);
       try {
-        setQueue(channelId, await api<QueueItem[]>(`/queue/${item.id}`, { method: "DELETE" }));
+        setQueue(channelId, await api<QueueItem[]>(`/queue/${item.id}?played=1`, { method: "DELETE" }));
       } catch {
         /* alguém já tirou */
       }
@@ -538,6 +548,20 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       return true;
     };
   }, [channelId, playQueued]);
+
+  // nada tocando e alguém pôs música na fila (/tocar no chat): a primeira da sala começa sozinha
+  const queueLen = useRef(queue.length);
+  const ytState = yt.state;
+  const ytPlayer = yt.playerRef;
+  useEffect(() => {
+    const grew = queue.length > queueLen.current;
+    queueLen.current = queue.length;
+    // "parado" = sem vídeo, ou o último terminou (pausado no fim)
+    const idle = !ytState || (!ytState.playing && ytPlayer.current?.getPlayerState() === 0);
+    if (!grew || !idle || !room || room.state !== "connected" || !queue[0]) return;
+    const ids = [room.localParticipant.identity, ...room.remoteParticipants.keys()].sort();
+    if (ids[0] === room.localParticipant.identity) void playQueued(queue[0]);
+  }, [queue, ytState, ytPlayer, room, playQueued]);
 
   /* ---------------- clipar momento ---------------- */
   const sharer = call.peers.find((p) => !p.isLocal && p.screen) ?? call.peers.find((p) => p.screen);
@@ -680,9 +704,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       startSpin,
       queue,
       playQueued,
+      isDj,
       clip,
     }),
-    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, clip],
+    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, isDj, clip],
   );
 
   return (

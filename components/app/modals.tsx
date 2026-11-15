@@ -14,6 +14,8 @@ import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, To
 import { keyName } from "./user-bar";
 import { BotsTab, SteamSettings } from "./integracoes";
 import { DesktopGameSettings } from "./jogo-app";
+import { ChannelAccess, MemberRoles, RolesTab } from "./cargos";
+import { BotBuilder } from "./bot-builder";
 import { Room } from "livekit-client";
 
 export function Modals() {
@@ -861,8 +863,10 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
     ...(admin
       ? ([
           ["canais", "Canais"],
+          ["cargos", "Cargos"],
           ["membros", "Membros"],
           ["bots", "Bots"],
+          ["webhooks", "Webhooks"],
         ] as [string, string][])
       : []),
   ];
@@ -874,7 +878,9 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
       {tab === "emojis" && <EmojisTab server={server} admin={admin} />}
       {tab === "canais" && <ChannelsTab server={server} />}
       {tab === "membros" && <MembersTab server={server} owner={role === "owner"} />}
-      {tab === "bots" && <BotsTab server={server} />}
+      {tab === "cargos" && <RolesTab server={server} />}
+      {tab === "bots" && <BotBuilder server={server} />}
+      {tab === "webhooks" && <BotsTab server={server} />}
     </SettingsFrame>
   );
 }
@@ -1197,14 +1203,14 @@ function ChannelsTab({ server }: { server: Server }) {
       <H>Canais</H>
       <div className="space-y-2">
         {server.channels.map((c) => (
-          <ChannelRow key={c.id} serverId={server.id} id={c.id} name={c.name} topic={c.topic} type={c.type} />
+          <ChannelRow key={c.id} server={server} id={c.id} name={c.name} topic={c.topic} type={c.type} />
         ))}
       </div>
     </div>
   );
 }
 
-function ChannelRow({ id, name, topic, type }: { serverId: string; id: string; name: string; topic: string; type: "text" | "voice" }) {
+function ChannelRow({ server, id, name, topic, type }: { server: Server; id: string; name: string; topic: string; type: "text" | "voice" }) {
   const [f, setF] = useState({ name, topic });
   const dirty = f.name !== name || f.topic !== topic;
   return (
@@ -1230,6 +1236,7 @@ function ChannelRow({ id, name, topic, type }: { serverId: string; id: string; n
           Salvar
         </button>
       )}
+      <ChannelAccess server={server} channelId={id} />
     </div>
   );
 }
@@ -1246,6 +1253,7 @@ function MembersTab({ server, owner }: { server: Server; owner: boolean }) {
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold">{m.user.display_name}</span>
               <span className="text-[12.5px] text-oat/45">@{m.user.username}</span>
+              {m.role === "member" && <MemberRoles server={server} member={m} />}
             </span>
             {m.role === "owner" ? (
               <span className="text-[13px] text-honey">Dono</span>

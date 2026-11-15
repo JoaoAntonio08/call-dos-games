@@ -239,9 +239,9 @@ export function BotsTab({ server }: { server: Server }) {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="mb-5 font-display text-[28px] font-semibold">Bots</h2>
+      <h2 className="mb-5 font-display text-[28px] font-semibold">Webhooks</h2>
       <p className="-mt-3 mb-5 text-[14px] leading-relaxed text-oat/55">
-        Comandos da casa em qualquer canal: <b>/dado</b>, <b>/moeda</b>, <b>/sortear</b>, <b>/escolher</b> e <b>/ajuda</b>. Um <b>webhook</b> é um link secreto que deixa um bot ou serviço de fora mandar mensagens num canal. Funciona com o mesmo formato do Discord, então
+        Para quem programa o próprio bot (para montar um sem código, use a aba Bots). Um <b>webhook</b> é um link secreto que deixa um bot ou serviço de fora mandar mensagens num canal. Funciona com o mesmo formato do Discord, então
         dá para usar com GitHub, alertas de servidor, bots de RSS, IFTTT, n8n e afins: é só colar o link onde pediria um webhook do Discord.
       </p>
       <label className="mb-4 block text-[13px] text-oat/60">

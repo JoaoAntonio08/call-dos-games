@@ -49,12 +49,28 @@ export interface Channel {
   topic: string;
   position: number;
   last_message_id: string | null;
+  /** cargos que veem o canal (vazio = todo mundo) */
+  view_roles?: string[];
+  /** cargos que escrevem (texto) ou falam (voz) no canal (vazio = todo mundo) */
+  send_roles?: string[];
+}
+
+export type Perm = "musica" | "dj" | "comandos" | "hype" | "apelidos" | "moderar_voz";
+
+export interface Role {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  perms: Perm[];
 }
 
 export interface Member {
   user: User;
   role: "owner" | "admin" | "member";
   nickname: string;
+  /** ids dos cargos da pessoa */
+  roles?: string[];
   joined_at: string;
 }
 
@@ -83,6 +99,11 @@ export interface Server {
   hall_threshold: number;
   /** segundos entre um hype e outro (0 = hype desligado) */
   hype_cooldown?: number;
+  roles?: Role[];
+  /** o que todo mundo do servidor pode, sem cargo nenhum */
+  everyone_perms?: Perm[];
+  /** o que EU posso neste servidor (dono e admins: tudo) */
+  my_perms?: Perm[];
   /** frases de boas-vindas próprias, com {nome}; vazio = as padrão */
   welcome_lines: string[];
   icon: Media | null;
@@ -132,6 +153,9 @@ export interface Message {
   reactions: Reaction[];
   edited_at: string | null;
   created_at: string;
+  /** só quem enviou vê (comando de música e respostas dele); some sozinha */
+  ephemeral?: boolean;
+  expires_at?: string | null;
   /** só no cliente: mensagem ainda sendo enviada */
   pending?: boolean;
   nonce?: string;

@@ -35,7 +35,10 @@ export function QueuePanel({ onClose, onPlaying }: { onClose: () => void; onPlay
     }
   }
 
+  const can = v.yt.canControl;
+
   function playNow() {
+    if (!can) return setError("Tem música de outra pessoa tocando: ponha na fila.");
     if (!v.yt.load(url)) return setError("Isso não parece um link do YouTube.");
     setUrl("");
     onPlaying();
@@ -53,7 +56,7 @@ export function QueuePanel({ onClose, onPlaying }: { onClose: () => void; onPlay
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (v.yt.state) void enqueue();
+          if (v.yt.state || !can) void enqueue();
           else playNow();
         }}
         className="mt-2.5"
@@ -68,7 +71,7 @@ export function QueuePanel({ onClose, onPlaying }: { onClose: () => void; onPlay
         />
         {error && <p className="mt-1.5 px-1 text-[12.5px] text-[#ff8f92]">{error}</p>}
         <div className="mt-2 flex gap-2">
-          <button type="button" onClick={playNow} disabled={!url.trim()} className="btn-ember flex h-10 flex-1 items-center justify-center gap-1.5 text-[14px]">
+          <button type="button" onClick={playNow} disabled={!url.trim() || !can} className="btn-ember flex h-10 flex-1 items-center justify-center gap-1.5 text-[14px]">
             <Play className="size-4" /> Tocar agora
           </button>
           <button type="button" onClick={() => void enqueue()} disabled={!url.trim() || busy} className="btn-quiet flex h-10 flex-1 items-center justify-center gap-1.5 text-[14px]">
@@ -88,7 +91,14 @@ export function QueuePanel({ onClose, onPlaying }: { onClose: () => void; onPlay
       ) : (
         <ul className="mt-1.5 max-h-[300px] space-y-1 overflow-y-auto">
           {v.queue.map((item, i) => (
-            <QueueRow key={item.id} item={item} first={i === 0} channelId={channelId!} onPlay={() => (void v.playQueued(item), onPlaying())} />
+            <QueueRow
+              key={item.id}
+              item={item}
+              first={i === 0}
+              channelId={channelId!}
+              dj={v.isDj}
+              onPlay={can ? () => (void v.playQueued(item), onPlaying()) : undefined}
+            />
           ))}
         </ul>
       )}
@@ -96,8 +106,9 @@ export function QueuePanel({ onClose, onPlaying }: { onClose: () => void; onPlay
   );
 }
 
-function QueueRow({ item, first, channelId, onPlay }: { item: QueueItem; first: boolean; channelId: string; onPlay: () => void }) {
+function QueueRow({ item, first, channelId, dj, onPlay }: { item: QueueItem; first: boolean; channelId: string; dj: boolean; onPlay?: () => void }) {
   const me = useStore((s) => s.me);
+  const mine = !!me && item.added_by === me.id;
   const who = useUser(item.added_by ?? undefined);
   const voted = !!me && item.voters.includes(me.id);
 
@@ -111,9 +122,9 @@ function QueueRow({ item, first, channelId, onPlay }: { item: QueueItem; first: 
 
   return (
     <li className={`group flex items-center gap-2.5 rounded-[11px] p-1.5 ${first ? "bg-ember/[0.08]" : "hover:bg-cocoa-3"}`}>
-      <button type="button" onClick={onPlay} className="relative shrink-0 overflow-hidden rounded-[8px]" aria-label={`Tocar ${item.title} agora`}>
+      <button type="button" onClick={onPlay} disabled={!onPlay} className="relative shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" aria-label={`Tocar ${item.title} agora`}>
         <img src={`https://i.ytimg.com/vi/${item.video_id}/mqdefault.jpg`} alt="" className="h-[45px] w-[80px] object-cover" loading="lazy" />
-        <span className="absolute inset-0 grid place-items-center bg-cocoa-0/60 opacity-0 transition-opacity group-hover:opacity-100">
+        <span className={`absolute inset-0 grid place-items-center bg-cocoa-0/60 opacity-0 transition-opacity ${onPlay ? "group-hover:opacity-100" : ""}`}>
           <Play className="size-5 fill-oat text-oat" />
         </span>
       </button>
@@ -137,6 +148,7 @@ function QueueRow({ item, first, channelId, onPlay }: { item: QueueItem; first: 
         <ChevronUp className="size-4" />
         {item.voters.length}
       </button>
+      {(mine || dj) && (
       <button
         type="button"
         onClick={() => void call(`/queue/${item.id}`, "DELETE")}
@@ -145,6 +157,7 @@ function QueueRow({ item, first, channelId, onPlay }: { item: QueueItem; first: 
       >
         <X className="size-4" />
       </button>
+      )}
     </li>
   );
 }

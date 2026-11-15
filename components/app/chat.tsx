@@ -376,7 +376,7 @@ const MessageItem = memo(function MessageItem({
   return (
     <div
       id={`m-${msg.id}`}
-      className={`group relative px-4 transition-colors hover:bg-cocoa-2/45 ${grouped ? "py-0.5" : "mt-3 pt-1 pb-0.5"} ${msg.pending ? "opacity-55" : ""} ${
+      className={`group relative px-4 transition-colors hover:bg-cocoa-2/45 ${grouped ? "py-0.5" : "mt-3 pt-1 pb-0.5"} ${msg.pending ? "opacity-55" : ""} ${msg.ephemeral ? "bg-ember/[0.04]" : ""} ${
         mentionsMe ? "border-l-2 border-ember bg-ember/[0.07] hover:bg-ember/[0.1]" : ""
       }`}
     >
@@ -429,6 +429,15 @@ const MessageItem = memo(function MessageItem({
                 {msg.edited_at && <span className="ml-1 text-[11px] text-oat/30">(editada)</span>}
               </div>
             )
+          )}
+          {msg.ephemeral && (
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-oat/40">
+              <span aria-hidden>👁</span>
+              Só você está vendo isto · some em 12 h ·
+              <button type="button" onClick={() => void api(`/messages/${msg.id}`, { method: "DELETE" }).catch((e) => toast(errorText(e)))} className="link-u text-ember-2">
+                Dispensar
+              </button>
+            </p>
           )}
           {msg.attachments.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-2">
@@ -631,7 +640,16 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
   const area = useRef<HTMLDivElement>(null);
   const typing = useStore((s) => s.typing[channelId]);
   const users = useStore((s) => s.users);
+  const meId = useStore((s) => s.me?.id);
   useTicker(1000, !!typing && Object.keys(typing).length > 0);
+  // canal em que só alguns cargos escrevem
+  const locked = useMemo(() => {
+    const ch = server?.channels.find((c) => c.id === channelId);
+    if (!server || !ch?.send_roles?.length) return false;
+    const mine = server.members.find((m) => m.user.id === meId);
+    if (!mine || mine.role !== "member") return false;
+    return !ch.send_roles.some((r) => mine.roles?.includes(r));
+  }, [server, channelId, meId]);
 
   // rascunho por canal
   useEffect(() => {
@@ -762,6 +780,14 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
     .filter(([, until]) => until > Date.now())
     .map(([id]) => users[id]?.display_name)
     .filter(Boolean) as string[];
+
+  if (locked) {
+    return (
+      <div className="shrink-0 px-3 pb-3 sm:px-4">
+        <p className="rounded-[14px] bg-cocoa-3 px-4 py-3 text-[14px] text-oat/50">🔒 Só alguns cargos podem escrever aqui.</p>
+      </div>
+    );
+  }
 
   return (
     <div

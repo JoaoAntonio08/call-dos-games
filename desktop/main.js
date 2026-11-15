@@ -93,8 +93,18 @@ function createWindow() {
       return { action: "allow", overrideBrowserWindowOptions: { width: 500, height: 640, autoHideMenuBar: true, backgroundColor: "#ffffff" } };
     }
     if (isApp(url)) {
-      win.loadURL(url);
-      return { action: "deny" };
+      const u = new URL(url);
+      if (/^\/app(\/|$)/.test(u.pathname)) {
+        // navega dentro do site já aberto: recarregar a janela derrubaria a call
+        const p = JSON.stringify(u.pathname + u.search + u.hash);
+        win.webContents
+          .executeJavaScript(`window.__cdgOpen ? (window.__cdgOpen(${p}), true) : false`)
+          .then((ok) => ok || win.loadURL(url))
+          .catch(() => win.loadURL(url));
+        return { action: "deny" };
+      }
+      // convite e outras páginas do site: janelinha separada, a principal (com a call) fica como está
+      return { action: "allow", overrideBrowserWindowOptions: { width: 1000, height: 760, autoHideMenuBar: true, backgroundColor: "#1f2023" } };
     }
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: "deny" };

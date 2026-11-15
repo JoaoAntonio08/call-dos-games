@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRightLeft, Gamepad2, HeadphoneOff, MessageCircle, MicOff, PhoneOff, UserRound, Volume2, VolumeX } from "lucide-react";
+import { ArrowRightLeft, Gamepad2, Tag, HeadphoneOff, MessageCircle, MicOff, PhoneOff, UserRound, Volume2, VolumeX } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { useStore, useUser } from "@/lib/store";
 import { closeUserMenu, toast, useUI } from "@/lib/ui";
@@ -17,12 +17,22 @@ function voiceChannelOf(server: Server | undefined, userId: string, voice: Recor
   return server?.channels.find((c) => c.type === "voice" && voice[c.id]?.some((m) => m.user_id === userId));
 }
 
-/** Pode mexer na call dos outros? Admin sobre quem tem cargo menor (o dono pode tudo). */
+/** Pode mexer na call dos outros? Admin sobre quem tem cargo menor (o dono pode tudo); cargo com "Moderar call" sobre membros comuns. */
 export function canModerate(server: Server | undefined, meId: string | undefined, targetId: string) {
   if (!server || !meId || meId === targetId) return false;
   const mine = server.members.find((m) => m.user.id === meId)?.role ?? "member";
   const theirs = server.members.find((m) => m.user.id === targetId)?.role ?? "member";
-  return RANK[mine] >= 1 && (mine === "owner" || RANK[mine] > RANK[theirs]);
+  if (RANK[mine] >= 1) return mine === "owner" || RANK[mine] > RANK[theirs];
+  return theirs === "member" && !!server.my_perms?.includes("moderar_voz");
+}
+
+/** Pode mudar o apelido dessa pessoa neste servidor? O seu sempre; o dos outros com a permissão "Apelidos" (o do dono, só ele). */
+export function canRename(server: Server | undefined, meId: string | undefined, targetId: string) {
+  if (!server || !meId) return false;
+  const target = server.members.find((m) => m.user.id === targetId);
+  if (!target) return false;
+  if (meId === targetId) return true;
+  return target.role !== "owner" && !!server.my_perms?.includes("apelidos");
 }
 
 export async function moveToChannel(server: Server, userId: string, channelId: string, meId: string | undefined, join: (cid: string) => Promise<void>) {
@@ -99,6 +109,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
   const openDm = useOpenDm();
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
+  const [nick, setNick] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -165,6 +176,18 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
   const mod = canModerate(server, me?.id, id);
   const vol = v.voiceVol[id] ?? 1;
   const otherRooms = server?.channels.filter((c) => c.type === "voice" && c.id !== theirChannel?.id) ?? [];
+  const rename = canRename(server, me?.id, id);
+  const currentNick = server?.members.find((m) => m.user.id === id)?.nickname ?? "";
+
+  async function saveNick(value: string) {
+    try {
+      await api(`/servers/${server!.id}/members/${id}`, { method: "PATCH", json: { nickname: value.trim() } });
+      toast(value.trim() ? `Apelido agora é ${value.trim()}.` : "Apelido tirado.");
+      closeUserMenu();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
 
   async function setMods(body: { mute?: boolean; deaf?: boolean; gain?: number }) {
     try {
@@ -221,6 +244,33 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
         </Item>
       )}
 
+      {rename &&
+        (nick === null ? (
+          <Item icon={<Tag />} hotkey="a" onClick={() => setNick(currentNick)}>
+            {isMe ? "Mudar meu apelido" : "Mudar apelido"}
+          </Item>
+        ) : (
+          <form
+            className="px-2 py-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveNick(nick);
+            }}
+          >
+            <input
+              autoFocus
+              className="field h-9 !py-0 text-[13.5px]"
+              value={nick}
+              maxLength={32}
+              placeholder={user.display_name}
+              onChange={(e) => setNick(e.target.value)}
+              onKeyDown={(e) => e.key !== "Escape" && e.stopPropagation()}
+              aria-label={`Apelido de ${user.display_name} neste servidor`}
+            />
+            <p className="mt-1 text-[11.5px] text-oat/40">Enter salva · vazio volta ao nome normal</p>
+          </form>
+        ))}
+
       {inMyCall && (
         <>
           <Sep />
@@ -249,7 +299,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
       {mod && theirChannel && server && (
         <>
           <Sep />
-          <p className="label px-2 pb-1 pt-1.5 text-oat/40">Para todos (admin)</p>
+          <p className="label px-2 pb-1 pt-1.5 text-oat/40">Para todos (moderação)</p>
           <Item icon={<MicOff />} hotkey="m" onClick={() => void setMods({ mute: !state?.smute })} checked={!!state?.smute}>
             Mutar para todos
           </Item>
