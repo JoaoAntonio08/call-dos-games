@@ -22,7 +22,7 @@
       <small id="auto">Tentando de novo sozinho em 15 s…</small>
     </div>
     <script>
-      const back = new URLSearchParams(location.search).get("voltar") || "https://call-dos-games.vercel.app/app";
+      const back = new URLSearchParams(location.search).get("voltar") || "https://call.zapeu.net/app";
       const retry = () => (location.href = back);
       document.getElementById("retry").onclick = retry;
       let n = 15;

@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, desktopCapturer, ipcMain, session, shell, clip
 const fs = require("node:fs");
 const path = require("node:path");
 
-const APP_URL = process.env.CDG_URL || "https://call-dos-games.vercel.app/app";
+const APP_URL = process.env.CDG_URL || "https://call.zapeu.net/app";
 const APP_ORIGIN = new URL(APP_URL).origin;
 // login com Google abre em janela própria do Google; o resto vai para o navegador
 const POPUP_HOSTS = ["accounts.google.com"];

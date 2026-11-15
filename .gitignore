@@ -60,7 +60,7 @@ backend/logs/
 
 # apps
 desktop/node_modules/
-desktop/dist/
+desktop/dist*/
 android/keystore/
 android/.gradle/
 android/build/

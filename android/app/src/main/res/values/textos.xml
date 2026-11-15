@@ -3,6 +3,6 @@
     <string name="app_name">Call dos Games</string>
     <string name="asset_statements" translatable="false">
         [{ \"relation\": [\"delegate_permission/common.handle_all_urls\"],
-           \"target\": { \"namespace\": \"web\", \"site\": \"https://call-dos-games.vercel.app\" } }]
+           \"target\": { \"namespace\": \"web\", \"site\": \"https://call.zapeu.net\" } }]
     </string>
 </resources>
