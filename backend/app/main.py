@@ -52,14 +52,22 @@ app = FastAPI(title="Call dos Games", lifespan=lifespan, docs_url="/docs", redoc
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # freio simples contra chute de senha: AUTH_RATE_LIMIT tentativas por IP a cada 10 minutos
 _attempts: dict[str, deque[float]] = defaultdict(deque)
-_LIMITED = {"/auth/login", "/auth/register", "/auth/forgot", "/auth/reset"}
+_LIMITED = {
+    "/auth/login",
+    "/auth/register",
+    "/auth/google",
+    "/auth/google/link",
+    "/auth/forgot",
+    "/auth/reset",
+    "/auth/password",
+}
 
 
 @app.middleware("http")
