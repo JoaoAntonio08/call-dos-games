@@ -32,6 +32,8 @@ Tudo de graça: o banco e a API rodam neste PC, e um túnel da Cloudflare (sem c
 3. **Para desligar:** `backend/Desligar servidor.cmd`.
 4. **Liga sozinho com o Windows:** tem um atalho "Call dos Games - servidor" na pasta Inicialização (Win+R, `shell:startup`). Ele espera a internet, liga tudo escondido e mostra um aviso só se der errado (log em `backend/logs/inicio.log`). Para parar de ligar sozinho, apague o atalho.
 
+5. **O banco fica de pé sozinho:** o Postgres roda pela tarefa agendada "Call dos Games - banco" (sem janela). Ela liga quando você entra no Windows e religa o banco se ele cair. Para recriar: `backend/scripts/banco-tarefa.ps1`.
+
 O PC precisa ficar ligado enquanto a turma usa. Os dados ficam no banco `calldosgames_prod` (cluster em `backend/.pgdata`, porta 5433) e os arquivos em `backend/uploads-prod`. Os logs ficam em `backend/logs`.
 
 Quando o amigo for hospedar, siga [backend/DEPLOY.md](backend/DEPLOY.md). Para levar os dados junto, use `pg_dump` do banco `calldosgames_prod` e copie a pasta `uploads-prod`.

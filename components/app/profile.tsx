@@ -1,5 +1,7 @@
 "use client";
 
+import { themeBgOf } from "@/lib/badges";
+import { BadgeRow } from "./badges";
 import { useEffect, useState } from "react";
 import { MessageCircle, Pencil, UserCheck, UserPlus } from "lucide-react";
 import { api, errorText } from "@/lib/api";
@@ -41,6 +43,7 @@ export function ProfilePopover() {
   const member = profile.serverId ? servers[profile.serverId]?.members.find((m) => m.user.id === u.id) : undefined;
   const relation = isMe ? "self" : full?.relation;
   const accent = u.accent || "#5865f2";
+  const themeBg = themeBgOf(u);
 
   async function addFriend() {
     try {
@@ -54,22 +57,25 @@ export function ProfilePopover() {
 
   return (
     <Popover anchor={profile.rect} onClose={closeProfile} side="right" className="w-[320px]">
-      <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: "var(--color-cocoa-0)" }}>
+      <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: themeBg ? (u.theme[0] ?? "var(--color-cocoa-0)") : "var(--color-cocoa-0)", background: themeBg }}>
         {/* banner: imagem ou faixa na cor do perfil */}
-        <div className="relative h-[112px]" style={{ background: `color-mix(in srgb, ${accent} 65%, #18191c)` }}>
+        <div className="relative h-[112px]" style={{ background: themeBg ? "transparent" : `color-mix(in srgb, ${accent} 65%, #18191c)` }}>
           {u.banner && <AnimImg media={u.banner} alt="" className="size-full object-cover" play />}
         </div>
         <div className="relative px-4 pb-4">
           <div className="-mt-11 flex items-end justify-between">
-            <span className="rounded-full p-1.5" style={{ background: "var(--color-cocoa-0)" }}>
+            <span className="rounded-full p-1.5" style={{ background: themeBg ? u.theme[0] : "var(--color-cocoa-0)" }}>
               <Avatar name={u.display_name} avatar={u.avatar} accent={accent} size={80} status={status} play />
             </span>
             {member && member.role !== "member" && (
               <span className="mb-2 rounded-full bg-cocoa-3 px-2.5 py-1 text-[11.5px] font-semibold text-oat/70">{member.role === "owner" ? "Dono do servidor" : "Admin"}</span>
             )}
           </div>
-          <div className="mt-2 rounded-[14px] bg-cocoa-2 p-3.5">
-            <p className="font-display text-[24px] font-semibold leading-tight">{member?.nickname || u.display_name}</p>
+          <BadgeRow user={u} className="mt-2" />
+          <div className={`mt-2 rounded-[14px] p-3.5 ${themeBg ? "bg-black/40 backdrop-blur-sm" : "bg-cocoa-2"}`}>
+            <p className="font-display text-[24px] font-semibold leading-tight" style={{ color: u.name_color || undefined }}>
+              {member?.nickname || u.display_name}
+            </p>
             <p className="text-[13.5px] text-oat/55">
               @{u.username}
               {u.pronouns && <span> · {u.pronouns}</span>}

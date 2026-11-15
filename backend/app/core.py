@@ -203,6 +203,7 @@ def media(file_id: int | None, animated: bool | None) -> dict[str, Any] | None:
 
 USER_COLUMNS = """
     u.id, u.username, u.display_name, u.bio, u.accent, u.status, u.custom_status, u.pronouns, u.created_at,
+    u.name_color, u.theme, u.badges,
     u.avatar_id, av.animated AS avatar_animated,
     u.banner_id, bn.animated AS banner_animated,
     u.join_sound_id
@@ -228,6 +229,9 @@ def user_out(r: asyncpg.Record | dict, presence: str | None = None) -> dict[str,
         "avatar": media(r["avatar_id"], r["avatar_animated"]),
         "banner": media(r["banner_id"], r["banner_animated"]),
         "join_sound": file_url(r["join_sound_id"]),
+        "name_color": r["name_color"],
+        "theme": list(r["theme"] or []),
+        "badges": list(r["badges"] or []),
         "created_at": r["created_at"].isoformat(),
     }
 

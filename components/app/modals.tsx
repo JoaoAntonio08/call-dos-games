@@ -8,6 +8,8 @@ import { logout, useStore } from "@/lib/store";
 import { closeModal, toast, useUI } from "@/lib/ui";
 import { useVoice, type VoicePrefs } from "@/lib/voice";
 import type { Me, Server } from "@/lib/types";
+import { BADGES, MAX_BADGES, nameColorOf, themeBgOf } from "@/lib/badges";
+import { BadgeRow } from "./badges";
 import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
 import { keyName } from "./user-bar";
 import { Room } from "livekit-client";
@@ -294,6 +296,41 @@ function FileButton({ accept, onFile, children, className = "btn-quiet h-9 px-3.
 /* configurações da pessoa                                             */
 /* ------------------------------------------------------------------ */
 
+const THEMES: [string, string][] = [
+  ["#5865f2", "#1f2023"],
+  ["#eb459e", "#2a1640"],
+  ["#f23f43", "#3b1d1d"],
+  ["#f0b232", "#3a2410"],
+  ["#23a55a", "#0f2a1d"],
+  ["#00a8fc", "#0b1f33"],
+  ["#9b59b6", "#1a1030"],
+  ["#ff7a45", "#2b1310"],
+];
+
+/** Bolinhas de cor + "outra cor" (seletor livre). */
+function Swatches({ value, colors, onPick, round = true }: { value: string; colors: string[]; onPick: (c: string) => void; round?: boolean }) {
+  const shape = round ? "rounded-full" : "rounded-[11px]";
+  return (
+    <div className="flex flex-wrap gap-2">
+      {colors.map((c) => (
+        <button
+          key={c}
+          type="button"
+          aria-label={`Cor ${c}`}
+          aria-pressed={value === c}
+          onClick={() => onPick(c)}
+          className={`press size-9 ${shape}`}
+          style={{ background: c, boxShadow: value === c ? "0 0 0 2px var(--color-cocoa-2), 0 0 0 4px var(--color-oat)" : undefined }}
+        />
+      ))}
+      <label className={`press relative grid size-9 cursor-pointer place-items-center overflow-hidden ${shape} border-2 border-dashed border-oat/25 text-[11px] text-oat/50`} title="Outra cor">
+        +
+        <input type="color" value={value || "#5865f2"} onChange={(e) => onPick(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
+      </label>
+    </div>
+  );
+}
+
 const ACCENTS = ["#5865f2", "#f23f43", "#f0b232", "#23a55a", "#1abc9c", "#00a8fc", "#9b59b6", "#eb459e", "#f2f3f5"];
 
 function UserSettings({ tab: initial }: { tab?: string }) {
@@ -321,7 +358,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         </button>
       }
     >
-      {tab === "perfil" && <ProfileTab />}
+      {tab === "perfil" && <ProfileTab goAccount={() => setTab("conta")} />}
       {tab === "voz" && <VoiceTab />}
       {tab === "conta" && <AccountTab />}
     </SettingsFrame>
@@ -341,7 +378,7 @@ function useSaveMe() {
   };
 }
 
-function ProfileTab() {
+function ProfileTab({ goAccount }: { goAccount: () => void }) {
   const me = useStore((s) => s.me)!;
   const save = useSaveMe();
   const [f, setF] = useState({ display_name: me.display_name, pronouns: me.pronouns, bio: me.bio, custom_status: me.custom_status });
@@ -386,6 +423,14 @@ function ProfileTab() {
         <Section title="Nome">
           <input className="field" value={f.display_name} maxLength={32} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
         </Section>
+        <Section title="Usuário">
+          <div className="flex items-center gap-3">
+            <p className="text-[15px]">@{me.username}</p>
+            <button type="button" onClick={goAccount} className="text-[13.5px] font-semibold text-ember-2 hover:underline">
+              Trocar
+            </button>
+          </div>
+        </Section>
         <Section title="Pronomes">
           <input className="field" value={f.pronouns} maxLength={24} placeholder="ele/dele, ela/dela…" onChange={(e) => setF({ ...f, pronouns: e.target.value })} />
         </Section>
@@ -412,6 +457,87 @@ function ProfileTab() {
               +
               <input type="color" value={me.accent} onChange={(e) => void save({ accent: e.target.value })} className="absolute inset-0 cursor-pointer opacity-0" />
             </label>
+          </div>
+        </Section>
+        <Section title="Tema do perfil" hint="Duas cores em degradê no seu cartão. Aparece para todo mundo que abrir seu perfil.">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void save({ theme: [] })}
+              className={`press h-9 rounded-[11px] px-3 text-[13px] font-semibold ${me.theme.length ? "bg-cocoa-0 text-oat/60" : "bg-oat text-cocoa-0"}`}
+            >
+              Sem tema
+            </button>
+            {THEMES.map((t) => {
+              const on = me.theme[0] === t[0] && me.theme[1] === t[1];
+              return (
+                <button
+                  key={t.join()}
+                  type="button"
+                  aria-label={`Tema ${t.join(" e ")}`}
+                  aria-pressed={on}
+                  onClick={() => void save({ theme: t })}
+                  className="press size-9 rounded-[11px]"
+                  style={{ background: `linear-gradient(180deg, ${t[0]}, ${t[1]})`, boxShadow: on ? "0 0 0 2px var(--color-cocoa-2), 0 0 0 4px var(--color-oat)" : undefined }}
+                />
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-[13px] text-oat/60">
+            {(["Cima", "Baixo"] as const).map((label, i) => (
+              <label key={label} className="flex items-center gap-2">
+                <span className="relative size-8 overflow-hidden rounded-[9px] border border-oat/15" style={{ background: me.theme[i] ?? THEMES[0][i] }}>
+                  <input
+                    type="color"
+                    value={me.theme[i] ?? THEMES[0][i]}
+                    onChange={(e) => {
+                      const next = [...(me.theme.length === 2 ? me.theme : THEMES[0])];
+                      next[i] = e.target.value;
+                      void save({ theme: next });
+                    }}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                  />
+                </span>
+                {label}
+              </label>
+            ))}
+          </div>
+        </Section>
+        <Section title="Cor do nome" hint="A cor do seu nome no chat e na lista de membros.">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void save({ name_color: "" })}
+              className={`press h-9 rounded-full px-3 text-[13px] font-semibold ${me.name_color ? "bg-cocoa-0 text-oat/60" : "bg-oat text-cocoa-0"}`}
+            >
+              Padrão
+            </button>
+            <Swatches value={me.name_color} colors={["#ff7aa2", "#ff8f5a", "#ffd166", "#7ee081", "#5ee0d6", "#6ec1ff", "#a99bff", "#f2f3f5"]} onPick={(c) => void save({ name_color: c })} />
+          </div>
+          <p className="mt-2 text-[14px] font-semibold" style={{ color: nameColorOf(me) }}>
+            {f.display_name || me.display_name} <span className="font-normal text-oat/40">fica assim no chat</span>
+          </p>
+        </Section>
+        <Section title="Insígnias" hint={`Escolha até ${MAX_BADGES}. Elas aparecem no seu perfil.`}>
+          <div className="flex flex-wrap gap-1.5">
+            {BADGES.map((b) => {
+              const on = me.badges.includes(b.id);
+              const full = !on && me.badges.length >= MAX_BADGES;
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  aria-pressed={on}
+                  disabled={full}
+                  onClick={() => void save({ badges: on ? me.badges.filter((x) => x !== b.id) : [...me.badges, b.id] })}
+                  className={`press inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold disabled:opacity-35 ${
+                    on ? "bg-ember text-white" : "bg-cocoa-0 text-oat/70 hover:text-oat"
+                  }`}
+                >
+                  <span aria-hidden>{b.emoji}</span> {b.label}
+                </button>
+              );
+            })}
           </div>
         </Section>
         <Section title="Som de entrada" hint="Toca para a turma quando você entra numa call. MP3, OGG, WAV ou M4A, até 2 MB (fica melhor com 1 a 3 segundos).">
@@ -448,16 +574,19 @@ function ProfileTab() {
       {/* prévia ao vivo do cartão */}
       <div className="lg:sticky lg:top-0 lg:self-start">
         <p className="label mb-3 text-oat/40">Prévia</p>
-        <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: "var(--color-cocoa-0)" }}>
-          <div className="h-[100px]" style={{ background: `color-mix(in srgb, ${me.accent} 65%, #18191c)` }}>
+        <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: me.theme[0] ?? "var(--color-cocoa-0)", background: themeBgOf(me) }}>
+          <div className="h-[100px]" style={{ background: themeBgOf(me) ? "transparent" : `color-mix(in srgb, ${me.accent} 65%, #18191c)` }}>
             {me.banner && <AnimImg media={me.banner} alt="" className="size-full object-cover" play />}
           </div>
           <div className="px-4 pb-4">
-            <span className="-mt-10 inline-block rounded-full bg-cocoa-0 p-1.5">
+            <span className="-mt-10 inline-block rounded-full p-1.5" style={{ background: me.theme[0] ?? "var(--color-cocoa-0)" }}>
               <Avatar name={f.display_name || me.display_name} avatar={me.avatar} accent={me.accent} size={72} status={me.status} play />
             </span>
-            <div className="mt-1 rounded-[14px] bg-cocoa-2 p-3">
-              <p className="font-display text-[22px] font-semibold leading-tight">{f.display_name || " "}</p>
+            <BadgeRow user={me} className="mt-1" />
+            <div className={`mt-2 rounded-[14px] p-3 ${me.theme.length ? "bg-black/40" : "bg-cocoa-2"}`}>
+              <p className="font-display text-[22px] font-semibold leading-tight" style={{ color: me.name_color || undefined }}>
+                {f.display_name || " "}
+              </p>
               <p className="text-[13px] text-oat/55">
                 @{me.username}
                 {f.pronouns && ` · ${f.pronouns}`}
@@ -472,10 +601,62 @@ function ProfileTab() {
   );
 }
 
+type Check = { state: "idle" | "checking" | "free" | "taken"; reason?: string };
+
+function UsernameField({ current, onSave }: { current: string; onSave: (u: string) => Promise<unknown> }) {
+  const [value, setValue] = useState(current);
+  const [check, setCheck] = useState<Check>({ state: "idle" });
+  const changed = value !== current && value.length > 0;
+  const shown: Check = changed ? check : { state: "idle" };
+
+  useEffect(() => {
+    if (!changed) return;
+    const t = window.setTimeout(async () => {
+      try {
+        const r = await api<{ ok: boolean; reason?: string }>(`/usernames/check?u=${encodeURIComponent(value)}`);
+        setCheck(r.ok ? { state: "free" } : { state: "taken", reason: r.reason });
+      } catch {
+        setCheck({ state: "idle" });
+      }
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [value, changed]);
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-oat/35">@</span>
+          <input
+            className="field pl-7"
+            value={value}
+            maxLength={32}
+            aria-describedby="username-check"
+            onChange={(e) => {
+              const next = e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, "");
+              setValue(next);
+              setCheck({ state: "checking" });
+            }}
+          />
+        </div>
+        {changed && (
+          <button type="button" disabled={shown.state !== "free"} onClick={() => void onSave(value)} className="btn-ember px-4 text-[14px]">
+            Salvar
+          </button>
+        )}
+      </div>
+      <p id="username-check" role="status" className="mt-1.5 min-h-[18px] text-[12.5px]">
+        {shown.state === "checking" && <span className="text-oat/45">Vendo se está livre…</span>}
+        {shown.state === "free" && <span className="text-moss">@{value} está livre.</span>}
+        {shown.state === "taken" && <span className="text-[#ff8f92]">{shown.reason}</span>}
+      </p>
+    </div>
+  );
+}
+
 function AccountTab() {
   const me = useStore((s) => s.me)!;
   const save = useSaveMe();
-  const [username, setUsername] = useState(me.username);
   const [pw, setPw] = useState({ current: "", new: "" });
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
@@ -486,18 +667,8 @@ function AccountTab() {
         <p className="text-[15px]">{me.email ?? "—"}</p>
         {me.has_google && <Tip>Conta ligada ao Google: dá para entrar pelo botão do Google.</Tip>}
       </Section>
-      <Section title="Usuário" hint="Letras minúsculas, números, ponto e _. É assim que a turma te adiciona.">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-oat/35">@</span>
-            <input className="field pl-7" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))} />
-          </div>
-          {username !== me.username && (
-            <button type="button" onClick={() => void save({ username }).then((r) => r && toast("Usuário trocado."))} className="btn-ember px-4 text-[14px]">
-              Salvar
-            </button>
-          )}
-        </div>
+      <Section title="Usuário" hint="Letras minúsculas, números, ponto e _. É assim que a turma te adiciona. Dá para trocar quando quiser, desde que ninguém esteja usando.">
+        <UsernameField key={me.username} current={me.username} onSave={(username) => save({ username }).then((r) => r && toast(`Agora você é @${username}.`))} />
       </Section>
       <Section title={me.has_password ? "Trocar senha" : "Criar uma senha"} hint={me.has_password ? "As outras sessões abertas saem quando você troca." : "Assim você também consegue entrar com e-mail e senha."}>
         <form
@@ -664,6 +835,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
   const [tab, setTab] = useState(initial ?? (admin ? "geral" : "sons"));
   const tabs: [string, string][] = [
     ...(admin ? ([["geral", "Visão geral"]] as [string, string][]) : []),
+    ["eu", "Seu perfil aqui"],
     ["sons", "Soundboard"],
     ["emojis", "Emojis"],
     ...(admin
@@ -676,11 +848,79 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
   return (
     <SettingsFrame title={server.name} tab={tab} setTab={setTab} tabs={tabs}>
       {tab === "geral" && <ServerGeneral server={server} owner={role === "owner"} />}
+      {tab === "eu" && <MyServerProfile server={server} />}
       {tab === "sons" && <SoundsTab server={server} admin={admin} />}
       {tab === "emojis" && <EmojisTab server={server} admin={admin} />}
       {tab === "canais" && <ChannelsTab server={server} />}
       {tab === "membros" && <MembersTab server={server} owner={role === "owner"} />}
     </SettingsFrame>
+  );
+}
+
+/** Frases que aparecem quando alguém entra no servidor. {nome} vira o nome da pessoa. */
+function WelcomeLines({ server, onSave }: { server: Server; onSave: (lines: string[]) => Promise<unknown> }) {
+  const saved = server.welcome_lines ?? [];
+  const [text, setText] = useState(saved.join("\n"));
+  const lines = text.split("\n").map((x) => x.trim()).filter(Boolean);
+  const dirty = lines.join("\n") !== saved.join("\n");
+  const sample = lines[0] ?? "{nome} puxou uma cadeira.";
+  return (
+    <Section title="Boas-vindas" hint="Uma frase por linha (até 12). {nome} vira o nome de quem chegou. Vazio usa as frases padrão.">
+      <textarea
+        className="field min-h-[96px] resize-y"
+        value={text}
+        placeholder={"{nome} chegou. Alguém passa a pipoca.\nOlha quem apareceu: {nome}!"}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <p className="mt-2 text-[13px] text-oat/55">
+        <span aria-hidden>☕ </span>
+        {sample.split("{nome}").join("Bia")}
+      </p>
+      {dirty && (
+        <div className="mt-2 flex justify-end">
+          <button type="button" onClick={() => void onSave(lines)} className="btn-ember h-9 px-4 text-[13.5px]">
+            Salvar boas-vindas
+          </button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/** Apelido só neste servidor (cada pessoa troca o seu). */
+function MyServerProfile({ server }: { server: Server }) {
+  const me = useStore((s) => s.me)!;
+  const mine = server.members.find((m) => m.user.id === me.id);
+  const [nick, setNick] = useState(mine?.nickname ?? "");
+  const dirty = nick.trim() !== (mine?.nickname ?? "");
+  async function save(value: string) {
+    try {
+      await api(`/servers/${server.id}/members/${me.id}`, { method: "PATCH", json: { nickname: value } });
+      setNick(value);
+      toast(value ? `Aqui você é ${value}.` : "Apelido tirado.");
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+  return (
+    <div className="max-w-xl">
+      <H>Seu perfil aqui</H>
+      <Section title="Apelido neste servidor" hint={`Só a turma de ${server.name} vê. Nos outros lugares continua "${me.display_name}".`}>
+        <div className="flex gap-2">
+          <input className="field flex-1" value={nick} maxLength={32} placeholder={me.display_name} onChange={(e) => setNick(e.target.value)} />
+          {dirty && (
+            <button type="button" onClick={() => void save(nick.trim())} className="btn-ember px-4 text-[14px]">
+              Salvar
+            </button>
+          )}
+        </div>
+        {mine?.nickname && !dirty && (
+          <button type="button" onClick={() => void save("")} className="mt-2 text-[13px] font-semibold text-oat/55 hover:text-oat">
+            Tirar apelido
+          </button>
+        )}
+      </Section>
+    </div>
   );
 }
 
@@ -729,20 +969,10 @@ function ServerGeneral({ server, owner }: { server: Server; owner: boolean }) {
       <Section title="Descrição" hint="Aparece no convite.">
         <textarea className="field min-h-[80px]" value={f.description} maxLength={200} onChange={(e) => setF({ ...f, description: e.target.value })} />
       </Section>
-      <Section title="Cor do servidor">
-        <div className="flex flex-wrap gap-2">
-          {ACCENTS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              aria-label={`Cor ${c}`}
-              onClick={() => void patch({ accent: c })}
-              className="press size-9 rounded-[11px]"
-              style={{ background: c, boxShadow: server.accent === c ? "0 0 0 2px var(--color-cocoa-2), 0 0 0 4px var(--color-oat)" : undefined }}
-            />
-          ))}
-        </div>
+      <Section title="Cor do servidor" hint="Pinta os botões, links e destaques do app enquanto a turma está neste servidor.">
+        <Swatches value={server.accent} colors={ACCENTS} round={false} onPick={(c) => void patch({ accent: c })} />
       </Section>
+      <WelcomeLines server={server} onSave={(welcome_lines) => patch({ welcome_lines }).then(() => toast("Boas-vindas salvas."))} />
       <Section title="Hall da Fama" hint="Quantas pessoas diferentes precisam reagir (sem contar quem escreveu) para a mensagem entrar no Hall.">
         <div className="flex flex-wrap gap-1.5">
           {[1, 2, 3, 4, 5, 7, 10].map((n) => (

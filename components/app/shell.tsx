@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { useRoute, useUI } from "@/lib/ui";
+import { accentVars } from "@/lib/theme";
 import { ServerRail } from "./rail";
 import { HomeSidebar, ServerSidebar } from "./sidebars";
 import { UserBar, VoiceBar } from "./user-bar";
@@ -23,6 +24,7 @@ export function Shell() {
   const dms = useStore((s) => s.dms);
   const connected = useStore((s) => s.connected);
   const navOpen = useUI((s) => s.navOpen);
+  const focusOn = useUI((s) => s.focus);
   const showMembers = useUI((s) => s.showMembers);
   const toastMsg = useUI((s) => s.toast);
 
@@ -70,6 +72,18 @@ export function Shell() {
     useUI.setState({ navOpen: false });
   }, [route.kind, route.kind === "server" ? (route.channelId ?? route.page) : route.kind === "dm" ? route.id : ""]);
 
+  // cor do servidor tinge o app inteiro (inclusive modais e cartões, que abrem fora desta árvore)
+  const tint = server?.accent;
+  useEffect(() => {
+    const vars = accentVars(tint) as Record<string, string> | undefined;
+    if (!vars) return;
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(vars)) root.setProperty(k, v);
+    return () => {
+      for (const k of Object.keys(vars)) root.removeProperty(k);
+    };
+  }, [tint]);
+
   // título da aba
   useEffect(() => {
     document.title = channel
@@ -90,12 +104,14 @@ export function Shell() {
   if (server && page === "lista") main = <ShowsView server={server} />;
 
   const members = server && channel?.type === "text" && showMembers;
+  // modo foco só vale na tela da call
+  const focus = focusOn && channel?.type === "voice";
 
   return (
     <div className="flex h-svh overflow-hidden bg-cocoa-1">
       {/* navegação: fixa no desktop, gaveta no celular */}
       <div
-        className={`fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:translate-x-0 ${navOpen ? "translate-x-0" : "-translate-x-full"}`}
+        className={`fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:translate-x-0 ${navOpen ? "translate-x-0" : "-translate-x-full"} ${focus ? "md:hidden" : ""}`}
       >
         <ServerRail />
         <div className="flex w-[248px] flex-col bg-cocoa-2">

@@ -1,8 +1,9 @@
 "use client";
 
+import { nameColorOf } from "@/lib/badges";
 import Link from "next/link";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FileText, Hash, Pencil, Phone, PhoneOff, Plus, Reply, SmilePlus, Trash2, Users, X } from "lucide-react";
+import { FileText, Hash, MessageSquare, Pencil, Phone, PhoneOff, Plus, Reply, SmilePlus, Trash2, Users, X } from "lucide-react";
 import { api, errorText, upload } from "@/lib/api";
 import { idGt, loadMessages, markRead, sendMessage, sendTyping, useStore, useUser, usePresence } from "@/lib/store";
 import { openProfile, toast, useUI } from "@/lib/ui";
@@ -102,6 +103,16 @@ export function ChatView({ channelId, server, channel, dm }: { channelId: string
 /* ------------------------------------------------------------------ */
 /* lista de mensagens                                                  */
 /* ------------------------------------------------------------------ */
+
+/** Chat de texto de um canal de voz, ao lado da call. */
+export function CallChat({ channel, server }: { channel: Channel; server: Server }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <MessageList channelId={channel.id} server={server} channel={channel} />
+      <Composer channelId={channel.id} server={server} placeholder={`Conversar em ${channel.name}`} />
+    </div>
+  );
+}
 
 function MessageList({ channelId, server, channel, dm }: { channelId: string; server?: Server; channel?: Channel; dm?: Dm }) {
   const items = useStore((s) => s.messages[channelId]?.items) ?? EMPTY;
@@ -222,6 +233,14 @@ function Welcome({ channel, dm, server }: { channel?: Channel; dm?: Dm; server?:
           <p className="text-[14px] text-oat/50">@{other.username}</p>
           <p className="mt-3 max-w-lg text-[14.5px] text-oat/60">O começo da conversa de vocês. Mande um oi, um meme ou chama pra call.</p>
         </>
+      ) : channel?.type === "voice" ? (
+        <>
+          <span className="grid size-12 place-items-center rounded-[16px] bg-cocoa-4 text-oat/70">
+            <MessageSquare className="size-6" />
+          </span>
+          <h2 className="mt-3 font-display text-[24px] leading-tight">Chat da call</h2>
+          <p className="mt-1 text-[13.5px] text-oat/55">Link, print, &quot;tô sem mic&quot;: o que for da call fica aqui, sem bagunçar os outros canais.</p>
+        </>
       ) : (
         <>
           <span className="grid size-16 place-items-center rounded-[20px] bg-cocoa-4 text-oat/70">
@@ -275,6 +294,7 @@ const MessageItem = memo(function MessageItem({
   const mentionsMe = new RegExp(`(^|[^\\w@])@${me.username.replace(/\./g, "\\.")}(?![\\w.])`, "i").test(msg.content);
   const nick = members?.find((m) => m.user.id === author?.id)?.nickname;
   const name = nick || author?.display_name || "Alguém que saiu";
+  const welcome = useStore((s) => (serverId ? s.servers[serverId]?.welcome_lines : undefined));
 
   const onMention = useCallback(
     (username: string, el: HTMLElement) => {
@@ -285,7 +305,9 @@ const MessageItem = memo(function MessageItem({
   );
 
   if (msg.kind === "join") {
-    const line = JOIN_LINES[Number(BigInt(msg.id) % BigInt(JOIN_LINES.length))];
+    const custom = welcome?.length ? welcome : null;
+    const pick = Number(BigInt(msg.id) % BigInt(custom ? custom.length : JOIN_LINES.length));
+    const line = custom ? (n: string) => custom[pick].split("{nome}").join(n) : JOIN_LINES[pick];
     return (
       <div className="group flex items-center gap-3 px-4 py-1.5 text-[14px] text-oat/55 hover:bg-cocoa-2/40">
         <span className="w-10 text-center text-[16px]" aria-hidden>
@@ -386,7 +408,7 @@ const MessageItem = memo(function MessageItem({
                 type="button"
                 onClick={(e) => author && openProfile(author.id, e.currentTarget, serverId)}
                 className="truncate text-[15px] font-semibold hover:underline"
-                style={{ color: author ? `color-mix(in srgb, ${author.accent} 70%, var(--color-oat))` : undefined }}
+                style={{ color: nameColorOf(author) }}
               >
                 {name}
               </button>

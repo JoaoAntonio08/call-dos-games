@@ -106,6 +106,7 @@ async def server_out(server_id: int) -> dict:
         "owner_id": sid(s["owner_id"]),
         "accent": s["accent"],
         "hall_threshold": s["hall_threshold"],
+        "welcome_lines": list(s["welcome_lines"] or []),
         "icon": media(s["icon_id"], s["icon_animated"]),
         "banner": media(s["banner_id"], s["banner_animated"]),
         "channels": [channel_out(c) for c in channels],
@@ -160,6 +161,7 @@ class ServerPatch(BaseModel):
     description: str | None = None
     accent: str | None = None
     hall_threshold: int | None = None
+    welcome_lines: list[str] | None = None
 
 
 @router.patch("/servers/{server_id}")
@@ -180,6 +182,9 @@ async def update_server(server_id: str, body: ServerPatch, me: Auth = CurrentUse
         if not 1 <= body.hall_threshold <= 50:
             raise err(400, "O Hall precisa de 1 a 50 pessoas.")
         await pool().execute("UPDATE servers SET hall_threshold = $1 WHERE id = $2", body.hall_threshold, s)
+    if body.welcome_lines is not None:
+        lines = [x.strip()[:120] for x in body.welcome_lines if x.strip()][:12]
+        await pool().execute("UPDATE servers SET welcome_lines = $1 WHERE id = $2", lines, s)
     await announce_server(s)
     return await server_out(s)
 

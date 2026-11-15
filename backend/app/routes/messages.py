@@ -22,7 +22,8 @@ SELECT_MESSAGES = """
            u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name, u.bio AS u_bio,
            u.accent AS u_accent, u.status AS u_status, u.custom_status AS u_custom_status, u.pronouns AS u_pronouns,
            u.created_at AS u_created_at, u.avatar_id AS u_avatar_id, av.animated AS u_avatar_animated,
-           u.banner_id AS u_banner_id, bn.animated AS u_banner_animated, u.join_sound_id AS u_join_sound_id
+           u.banner_id AS u_banner_id, bn.animated AS u_banner_animated, u.join_sound_id AS u_join_sound_id,
+           u.name_color AS u_name_color, u.theme AS u_theme, u.badges AS u_badges
     FROM messages m
     LEFT JOIN users u ON u.id = m.author_id
     LEFT JOIN files av ON av.id = u.avatar_id
@@ -146,8 +147,6 @@ class MessageIn(BaseModel):
 async def create_message(channel_id: str, body: MessageIn, me: Auth = CurrentUser) -> dict:
     cid = parse_id(channel_id)
     ch = await require_channel(me.id, cid)
-    if ch["type"] == "voice":
-        raise err(400, "Canal de voz não tem chat de texto.")
     content = body.content.strip()
     if len(content) > MAX_LEN:
         raise err(400, f"Mensagem longa demais (máximo {MAX_LEN} caracteres).")

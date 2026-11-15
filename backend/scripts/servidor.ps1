@@ -28,7 +28,16 @@ function Stop-Saved($name) {
 & "$PgBin\pg_ctl.exe" status -D $PgData *> $null
 if ($LASTEXITCODE -ne 0) {
     Say "ligando o Postgres (porta 5433)..."
-    & "$PgBin\pg_ctl.exe" start -D $PgData -l (Join-Path $Logs "postgres.log") -o "-p 5433 -c listen_addresses=127.0.0.1" -w | Out-Null
+    # o banco roda pela tarefa agendada, numa janela oculta: fechar este terminal não derruba ele
+    $task = "Call dos Games - banco"
+    if (-not (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue)) { & (Join-Path $PSScriptRoot "banco-tarefa.ps1") }
+    Start-ScheduledTask -TaskName $task
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 1
+        & "$PgBin\pg_ctl.exe" status -D $PgData *> $null
+        if ($LASTEXITCODE -eq 0) { break }
+    }
+    if ($LASTEXITCODE -ne 0) { throw "O Postgres não ligou. Veja backend\logs\postgres.log." }
 }
 Say "Postgres ok"
 

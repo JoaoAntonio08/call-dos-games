@@ -211,14 +211,21 @@ export function Popover({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !anchor) return;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const gap = 10;
-    let left = side === "right" ? anchor.right + gap : side === "left" ? anchor.left - w - gap : anchor.left;
-    let top = side === "top" ? anchor.top - h - gap : side === "bottom" ? anchor.bottom + gap : anchor.top;
-    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-    top = Math.max(8, Math.min(top, window.innerHeight - h - 8));
-    setPos({ left, top });
+    const place = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const gap = 10;
+      let left = side === "right" ? anchor.right + gap : side === "left" ? anchor.left - w - gap : anchor.left;
+      let top = side === "top" ? anchor.top - h - gap : side === "bottom" ? anchor.bottom + gap : anchor.top;
+      left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+      top = Math.max(8, Math.min(top, window.innerHeight - h - 8));
+      setPos((p) => (p && p.left === left && p.top === top ? p : { left, top }));
+    };
+    place();
+    // o conteúdo pode crescer depois (perfil completo chega da API): reposiciona para não sair da tela
+    const ro = new ResizeObserver(place);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [anchor, side]);
 
   useEffect(() => {
@@ -241,7 +248,7 @@ export function Popover({
     <div
       ref={ref}
       className={`pop-in fixed z-50 ${className}`}
-      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? "visible" : "hidden" }}
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? "visible" : "hidden", maxHeight: "calc(100svh - 16px)", overflowY: "auto" }}
     >
       {children}
     </div>,

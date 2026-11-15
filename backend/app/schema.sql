@@ -208,3 +208,9 @@ CREATE TABLE IF NOT EXISTS shows (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS shows_server ON shows (server_id, updated_at DESC);
+
+-- personalização (2026-11): tema do perfil, cor do nome, insígnias, boas-vindas do servidor
+ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS badges TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS welcome_lines TEXT[] NOT NULL DEFAULT '{}';

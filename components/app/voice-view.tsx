@@ -6,6 +6,9 @@ import {
   Eraser,
   Headphones,
   HeadphoneOff,
+  Maximize2,
+  MessageSquare,
+  Minimize2,
   Mic,
   MicOff,
   MonitorOff,
@@ -23,8 +26,8 @@ import {
   VideoOff,
   Volume2,
 } from "lucide-react";
-import { useStore, useUser } from "@/lib/store";
-import { openModal, useUI } from "@/lib/ui";
+import { isUnread, useStore, useUser } from "@/lib/store";
+import { openModal, toggleUI, useUI } from "@/lib/ui";
 import { useVoice, type Spin, type Stroke } from "@/lib/voice";
 import { DEFAULT_SHARE, RESOLUTIONS, type Peer, type ShareSettings } from "@/lib/use-call";
 import { loadJSON, saveJSON } from "@/lib/prefs";
@@ -36,6 +39,7 @@ import { YouTubeStage } from "@/components/room/youtube-stage";
 import { DevicesPanel, SharePanel } from "@/components/room/panels";
 import { Avatar } from "./bits";
 import { QueuePanel } from "./queue-panel";
+import { CallChat } from "./chat";
 
 /* ------------------------------------------------------------------ */
 /* página de um canal de voz                                           */
@@ -46,7 +50,18 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
   const here = v.channelId === channel.id;
   const inside = useStore((s) => s.voice[channel.id]) ?? [];
   const livekit = useStore((s) => s.livekit);
+  const chatOpen = useUI((s) => s.callChat);
+  const focus = useUI((s) => s.focus);
+  const unread = useStore((s) => isUnread(channel.id, channel.last_message_id, s.reads));
   useTicker(1000, inside.length > 0 && !here);
+
+  // Esc sai do modo foco
+  useEffect(() => {
+    if (!focus) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !useUI.getState().modal && toggleUI("focus");
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focus]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-cocoa-1">
@@ -57,10 +72,36 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
         <Volume2 className="hidden size-5 text-oat/40 md:block" />
         <h1 className="font-semibold">{channel.name}</h1>
         {here && <span className="live-dot ml-1 !bg-moss" />}
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => toggleUI("callChat")}
+            aria-pressed={chatOpen}
+            title={chatOpen ? "Fechar o chat da call" : "Abrir o chat da call"}
+            aria-label={chatOpen ? "Fechar o chat da call" : "Abrir o chat da call"}
+            className={`press relative flex h-8 items-center gap-1.5 rounded-[9px] px-2.5 text-[13px] font-semibold ${chatOpen ? "bg-cocoa-4 text-oat" : "text-oat/60 hover:bg-cocoa-4 hover:text-oat"}`}
+          >
+            <MessageSquare className="size-4" />
+            <span className="hidden sm:inline">Chat</span>
+            {unread && !chatOpen && <span className="absolute right-1 top-1 size-2 rounded-full bg-rust" aria-label="mensagens novas" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleUI("focus")}
+            aria-pressed={focus}
+            title={focus ? "Mostrar servidores e canais (Esc)" : "Esconder servidores e canais"}
+            aria-label={focus ? "Mostrar servidores e canais" : "Esconder servidores e canais"}
+            className="press hidden size-8 place-items-center rounded-[9px] text-oat/60 hover:bg-cocoa-4 hover:text-oat md:grid"
+          >
+            {focus ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </button>
+        </div>
       </header>
 
+      <div className="relative flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
       {here ? (
-        <CallStage server={server} />
+        <CallStage server={server} strip={chatOpen} />
       ) : (
         <div className="grid flex-1 place-items-center overflow-y-auto p-6">
           <div className="w-full max-w-md text-center">
@@ -93,6 +134,16 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
           </div>
         </div>
       )}
+      </div>
+      {chatOpen && (
+        <aside
+          aria-label={`Chat de ${channel.name}`}
+          className="absolute inset-y-0 right-0 z-20 flex w-full max-w-[360px] flex-col border-l border-cocoa-0/60 bg-cocoa-3 shadow-2xl lg:static lg:w-[340px] lg:shadow-none xl:w-[380px] xl:max-w-none"
+        >
+          <CallChat channel={channel} server={server} />
+        </aside>
+      )}
+      </div>
     </div>
   );
 }
@@ -113,16 +164,49 @@ function InsideAvatar({ id }: { id: string }) {
 
 type Dock = "share" | "yt" | "devices" | "fun" | "sounds" | "react" | null;
 
-export function CallStage({ server, compact }: { server?: Server; compact?: boolean }) {
+/**
+ * O palco é desmontado quando você sai da tela da call (vai ler o chat, por exemplo).
+ * Aqui fica o que estava aberto em cada call, para voltar do mesmo jeito.
+ */
+interface StageMemo {
+  pinned: string | null;
+  board: boolean;
+  roll: boolean;
+  spin: string | null;
+  strokes: number;
+}
+const stageMemo = new Map<string, StageMemo>();
+/** Roleta girada há mais tempo que isso não abre sozinha quando você volta para a call. */
+const FRESH_SPIN_MS = 12_000;
+
+/** strip: a turma fica numa faixa embaixo do palco (quando o chat da call ocupa a lateral). */
+export function CallStage({ server, compact, strip }: { server?: Server; compact?: boolean; strip?: boolean }) {
   const v = useVoice();
   const { call, yt } = v;
   const livekitCloud = useStore((s) => s.livekitCloud);
+  const memoKey = v.channelId ?? "";
+  // o que já foi visto: roleta antiga e desenhos antigos não abrem nada de novo
+  const [init] = useState<StageMemo>(
+    () =>
+      stageMemo.get(memoKey) ?? {
+        pinned: null,
+        board: false,
+        roll: false,
+        spin: v.spin && Date.now() - v.spin.at > FRESH_SPIN_MS ? v.spin.id : null,
+        strokes: v.strokes.length,
+      },
+  );
   const [dock, setDock] = useState<Dock>(null);
-  const [pinned, setPinned] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<string | null>(init.pinned);
   const [share, setShare] = useState<ShareSettings>(DEFAULT_SHARE);
-  const [boardOpen, setBoardOpen] = useState(false);
-  const [rollOpen, setRollOpen] = useState(false);
-  const lastSpin = useRef<string | null>(null);
+  const [boardOpen, setBoardOpen] = useState(init.board);
+  const [rollOpen, setRollOpen] = useState(init.roll);
+  const lastSpin = useRef<string | null>(init.spin);
+  const seenStrokes = useRef(init.strokes);
+
+  useEffect(() => {
+    stageMemo.set(memoKey, { pinned, board: boardOpen, roll: rollOpen, spin: lastSpin.current, strokes: seenStrokes.current });
+  });
 
   useEffect(() => setShare(loadJSON("share", DEFAULT_SHARE)), []);
 
@@ -148,9 +232,11 @@ export function CallStage({ server, compact }: { server?: Server; compact?: bool
       setPinned("roll");
     }
   }, [v.spin]);
-  // alguém começou a desenhar
+  // alguém desenhou algo novo: abre o quadro
   useEffect(() => {
-    if (v.strokes.length && !boardOpen) setBoardOpen(true);
+    const n = v.strokes.length;
+    if (n > seenStrokes.current && !boardOpen) setBoardOpen(true);
+    seenStrokes.current = n;
   }, [v.strokes.length, boardOpen]);
 
   const me = call.peers.find((p) => p.isLocal);
@@ -162,7 +248,10 @@ export function CallStage({ server, compact }: { server?: Server; compact?: bool
     ...(rollOpen ? [{ id: "roll", label: "Roleta" }] : []),
   ];
   const auto = yt.state ? "yt" : screens.length ? `s:${(screens.find((p) => !p.isLocal) ?? screens[0]).identity}` : boardOpen ? "board" : rollOpen ? "roll" : null;
-  const stage = pinned && options.some((o) => o.id === pinned) ? pinned : auto;
+  // "grid" = a turma em grade, mesmo com tela, vídeo ou atividade aberta
+  const stage = pinned === "grid" ? null : pinned && options.some((o) => o.id === pinned) ? pinned : auto;
+  const tabs = options.length ? [{ id: "grid", label: "Pessoas" }, ...options] : [];
+  const current = stage ?? "grid";
   const stagePeer = stage?.startsWith("s:") ? screens.find((p) => `s:${p.identity}` === stage) : undefined;
 
   const sounds = useStore((s) => (server ? server.sounds : Object.values(s.servers).flatMap((x) => x.sounds)));
@@ -174,26 +263,26 @@ export function CallStage({ server, compact }: { server?: Server; compact?: bool
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className={`flex min-h-0 flex-1 flex-col gap-3 ${compact ? "p-2" : "p-3 sm:p-4"} lg:flex-row`}>
+      {tabs.length > 0 && (
+        <div className={`flex shrink-0 gap-1 overflow-x-auto ${compact ? "px-2 pt-2" : "px-3 pt-3 sm:px-4"}`} role="tablist" aria-label="O que mostrar">
+          {tabs.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              role="tab"
+              aria-selected={o.id === current}
+              onClick={() => setPinned(o.id)}
+              className={`press shrink-0 rounded-full px-3 py-1 text-[13px] font-semibold ${o.id === current ? "bg-oat text-cocoa-0" : "text-oat/55 hover:bg-cocoa-4 hover:text-oat"}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className={`flex min-h-0 flex-1 flex-col gap-3 ${compact ? "p-2" : "p-3 sm:p-4"} ${strip ? "" : "lg:flex-row"}`}>
         {stage ? (
           <>
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {options.length > 1 && (
-                <div className="mb-2.5 flex shrink-0 gap-1 overflow-x-auto" role="tablist" aria-label="O que mostrar">
-                  {options.map((o) => (
-                    <button
-                      key={o.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={o.id === stage}
-                      onClick={() => setPinned(o.id)}
-                      className={`press shrink-0 rounded-full px-3 py-1 text-[13px] font-semibold ${o.id === stage ? "bg-oat text-cocoa-0" : "text-oat/55 hover:bg-cocoa-4 hover:text-oat"}`}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              )}
               <div className="relative min-h-0 flex-1 overflow-hidden rounded-[16px] bg-cocoa-0">
                 {yt.state && (
                   <div className={stage === "yt" ? "absolute inset-0" : "hidden"}>
@@ -212,7 +301,11 @@ export function CallStage({ server, compact }: { server?: Server; compact?: bool
             </section>
             <aside
               aria-label="Pessoas na call"
-              className="flex h-24 shrink-0 gap-2 overflow-x-auto sm:h-28 lg:h-auto lg:w-56 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden xl:w-64 [&>*]:w-40 [&>*]:shrink-0 sm:[&>*]:w-44 lg:[&>*]:w-full"
+              className={
+                strip
+                  ? "flex h-24 shrink-0 gap-2 overflow-x-auto sm:h-28 [&>*]:w-40 [&>*]:shrink-0 sm:[&>*]:w-44"
+                  : "flex h-24 shrink-0 gap-2 overflow-x-auto sm:h-28 lg:h-auto lg:w-56 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden xl:w-64 [&>*]:w-40 [&>*]:shrink-0 sm:[&>*]:w-44 lg:[&>*]:w-full"
+              }
             >
               {call.peers.map((p) => (
                 <Tile key={p.identity} peer={p} compact />
@@ -709,8 +802,10 @@ function Roulette({ spin, onClose }: { spin: Spin | null; onClose: () => void })
   });
 
   return (
-    <div className="absolute inset-0 grid grid-cols-1 place-items-center gap-6 overflow-y-auto bg-cocoa-2 p-6 md:grid-cols-[1fr_260px]">
-      <div className="relative">
+    // @container: a roda e as opções ficam lado a lado só quando o palco tem espaço (com o chat aberto ele encolhe)
+    <div className="@container absolute inset-0 overflow-y-auto bg-cocoa-2">
+      <div className="grid min-h-full grid-cols-1 place-items-center gap-6 p-6 @2xl:grid-cols-[1fr_260px]">
+      <div className="relative mb-12">
         <span aria-hidden className="absolute left-1/2 top-[-6px] z-10 -translate-x-1/2 text-[26px] leading-none text-oat drop-shadow">
           ▼
         </span>
@@ -769,6 +864,7 @@ function Roulette({ spin, onClose }: { spin: Spin | null; onClose: () => void })
         <button type="button" onClick={onClose} className="link-u mx-auto mt-3 block text-[13px] text-oat/50 hover:text-oat">
           Fechar roleta
         </button>
+      </div>
       </div>
     </div>
   );

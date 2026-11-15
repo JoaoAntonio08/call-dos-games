@@ -15,10 +15,42 @@ interface UI {
     | null;
   showMembers: boolean;
   navOpen: boolean;
+  /** chat ao lado da call */
+  callChat: boolean;
+  /** esconde servidores e canais para a call ocupar a tela */
+  focus: boolean;
   toast: { id: number; text: string } | null;
 }
 
-export const useUI = create<UI>(() => ({ profile: null, modal: null, showMembers: true, navOpen: false, toast: null }));
+function remembered(key: string, fallback: boolean) {
+  try {
+    const v = localStorage.getItem(`cdg:ui:${key}`);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+export const useUI = create<UI>(() => ({
+  profile: null,
+  modal: null,
+  showMembers: true,
+  navOpen: false,
+  toast: null,
+  callChat: typeof window !== "undefined" && remembered("callChat", false),
+  focus: false,
+}));
+
+/** Liga/desliga uma preferência de tela e lembra dela neste navegador. */
+export function toggleUI(key: "callChat" | "focus") {
+  const next = !useUI.getState()[key];
+  useUI.setState({ [key]: next } as Partial<UI>);
+  try {
+    localStorage.setItem(`cdg:ui:${key}`, next ? "1" : "0");
+  } catch {
+    /* sem armazenamento */
+  }
+}
 
 export const openProfile = (id: string, el: HTMLElement, serverId?: string) =>
   useUI.setState({ profile: { id, rect: el.getBoundingClientRect(), serverId } });

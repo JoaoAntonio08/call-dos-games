@@ -19,6 +19,11 @@ export interface User {
   banner: Media | null;
   join_sound: string | null;
   created_at: string;
+  /** cor do nome ("" = tom da cor do perfil) */
+  name_color: string;
+  /** tema do cartão: [cima, baixo] ou [] */
+  theme: string[];
+  badges: string[];
 }
 
 export interface Me extends User {
@@ -74,6 +79,8 @@ export interface Server {
   owner_id: string;
   accent: string;
   hall_threshold: number;
+  /** frases de boas-vindas próprias, com {nome}; vazio = as padrão */
+  welcome_lines: string[];
   icon: Media | null;
   banner: Media | null;
   channels: Channel[];

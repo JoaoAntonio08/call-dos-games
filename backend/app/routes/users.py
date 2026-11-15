@@ -55,6 +55,29 @@ class MeIn(BaseModel):
     status: str | None = None
     custom_status: str | None = None
     pronouns: str | None = None
+    name_color: str | None = None
+    theme: list[str] | None = None
+    badges: list[str] | None = None
+
+
+# insígnias que dá para escolher (o site tem a mesma lista em lib/badges.ts)
+BADGES = {
+    "gamer", "otaku", "dj", "artista", "streamer", "coruja", "cafe", "pizza",
+    "boss", "sono", "carry", "noob", "cozinha", "cinema", "leitura", "pet",
+}
+MAX_BADGES = 4
+
+
+@router.get("/usernames/check")
+async def check_username(u: str, me: Auth = CurrentUser) -> dict:
+    try:
+        name = validate_username(u)
+    except Exception as e:  # formato inválido
+        return {"ok": False, "reason": getattr(e, "detail", "Nome inválido.")}
+    row = await pool().fetchrow("SELECT id FROM users WHERE lower(username) = $1", name.lower())
+    if row and row["id"] != me.id:
+        return {"ok": False, "reason": "Já tem alguém com esse @."}
+    return {"ok": True, "username": name}
 
 
 @router.patch("/me")
@@ -81,6 +104,19 @@ async def update_me(body: MeIn, me: Auth = CurrentUser) -> dict:
         sets["custom_status"] = body.custom_status.strip()[:80]
     if body.pronouns is not None:
         sets["pronouns"] = body.pronouns.strip()[:24]
+    if body.name_color is not None:
+        if body.name_color and not HEX_RE.match(body.name_color):
+            raise err(400, "Cor inválida.")
+        sets["name_color"] = body.name_color.lower()
+    if body.theme is not None:
+        if len(body.theme) not in (0, 2) or not all(HEX_RE.match(c) for c in body.theme):
+            raise err(400, "O tema precisa de duas cores.")
+        sets["theme"] = [c.lower() for c in body.theme]
+    if body.badges is not None:
+        picked = list(dict.fromkeys(body.badges))
+        if len(picked) > MAX_BADGES or any(b not in BADGES for b in picked):
+            raise err(400, f"Escolha até {MAX_BADGES} insígnias da lista.")
+        sets["badges"] = picked
     if sets:
         cols = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(sets))
         try:

@@ -1,5 +1,6 @@
 "use client";
 
+import { nameColorOf } from "@/lib/badges";
 import { Crown, Shield } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { openProfile } from "@/lib/ui";
@@ -38,7 +39,7 @@ export function MemberList({ server }: { server: Server }) {
                   <Avatar name={u.display_name} avatar={u.avatar} accent={u.accent} size={34} status={st} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
-                      <span className="truncate text-[14.5px] font-medium" style={{ color: `color-mix(in srgb, ${u.accent} 60%, var(--color-oat))` }}>
+                      <span className="truncate text-[14.5px] font-medium" style={{ color: nameColorOf(u, 60) }}>
                         {m.nickname || u.display_name}
                       </span>
                       {m.role === "owner" && <Crown className="size-3.5 shrink-0 text-honey" aria-label="Dono" />}
