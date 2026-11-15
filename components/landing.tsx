@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Dices, Mic, MicOff, MonitorUp, Music2 } from "lucide-react";
 import { WarpCarousel, type WarpCard } from "@/components/ui/warp-carousel";
 import { getToken } from "@/lib/api";
-import { normalizeKey, randomKey } from "@/lib/room-key";
+import { normalizeKey, randomKey, roomNameFromKey } from "@/lib/room-key";
 import { display } from "@/lib/fonts";
 import { loadName, saveName, setAutoJoin } from "@/lib/prefs";
 
@@ -222,7 +222,7 @@ export function Landing() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!name.trim() || k.length < 3) return;
+              if (!name.trim() || !roomNameFromKey(k)) return;
               saveName(name.trim());
               setAutoJoin(k);
               router.push(`/sala/${k}`);
@@ -244,7 +244,7 @@ export function Landing() {
                 <Dices className="size-5 transition-transform duration-300" style={{ transform: `rotate(${spin * 90}deg)` }} />
               </button>
             </div>
-            <button type="submit" disabled={!name.trim() || k.length < 3} className="btn-ember h-12 w-full text-[15px]">
+            <button type="submit" disabled={!name.trim() || !roomNameFromKey(k)} className="btn-ember h-12 w-full text-[15px]">
               Entrar na call
             </button>
           </form>

@@ -36,6 +36,7 @@ class Settings:
     livekit_url = env("LIVEKIT_URL")
     livekit_key = env("LIVEKIT_API_KEY")
     livekit_secret = env("LIVEKIT_API_SECRET")
+    livekit_token_ttl = max(60, min(900, int(env("LIVEKIT_TOKEN_TTL_SECONDS", "300"))))
     google_client_id = env("GOOGLE_CLIENT_ID")
     resend_key = env("RESEND_API_KEY")
     email_from = env("EMAIL_FROM")

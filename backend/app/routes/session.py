@@ -66,7 +66,7 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
         # canal de voz restrito: quem não tem o cargo só escuta
         "canPublish": bool(ch.get("can_send", True)),
         "canSubscribe": not mods["deaf"],
-        "canPublishData": True,
+        "canPublishData": bool(ch.get("can_send", True)),
     }
     src = publish_sources(mods["mute"], mods.get("noshare", False))
     if src == []:
@@ -79,7 +79,7 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
         "sub": str(me.id),
         "name": profile["display_name"],
         "nbf": now - 10,
-        "exp": now + 12 * 3600,
+        "exp": now + settings.livekit_token_ttl,
         # o resto da call lê foto, cor e som de entrada daqui
         "metadata": json.dumps(
             {

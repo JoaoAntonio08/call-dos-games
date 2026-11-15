@@ -64,12 +64,50 @@ async def mods_of(server_id: int | None, user_id: int) -> dict[str, Any]:
 
 
 async def apply_permissions(channel_id: int, user_id: int, mods: dict[str, Any]) -> None:
-    perm: dict[str, Any] = {"can_subscribe": not mods["deaf"], "can_publish": True, "can_publish_data": True}
+    ch = await can_access_channel(user_id, channel_id)
+    if not ch:
+        await revoke_voice_participant(channel_id, user_id, "Você perdeu acesso a esta call.")
+        return
+    can_send = bool(ch.get("can_send", True))
+    perm: dict[str, Any] = {
+        "can_subscribe": not mods["deaf"],
+        "can_publish": can_send,
+        "can_publish_data": can_send,
+    }
     src = publish_sources(mods["mute"], mods.get("noshare", False))
     if src == []:
         perm["can_publish"] = False  # lista vazia no LiveKit quer dizer "tudo": aqui é "nada"
     perm["can_publish_sources"] = [s.upper() for s in src] if src else []
     await livekit("UpdateParticipant", room_name(channel_id), {"identity": str(user_id), "permission": perm})
+
+
+async def revoke_voice_participant(channel_id: int, user_id: int, reason: str) -> None:
+    await hub.send([user_id], "voice_kick", {"channel_id": sid(channel_id), "by": reason})
+    await livekit("RemoveParticipant", room_name(channel_id), {"identity": str(user_id)})
+    if hub.user_voice.get(user_id) == channel_id:
+        await hub.set_voice(user_id, None, {})
+
+
+async def revoke_server_voice(server_id: int, user_id: int) -> None:
+    """Remove também de salas LiveKit que possam não estar mais no estado em memória."""
+    rows = await pool().fetch("SELECT id FROM channels WHERE server_id = $1 AND type = 'voice'", server_id)
+    for row in rows:
+        await livekit("RemoveParticipant", room_name(row["id"]), {"identity": str(user_id)})
+    current = hub.user_voice.get(user_id)
+    channel_ids = {row["id"] for row in rows}
+    if current in channel_ids:
+        await hub.send([user_id], "voice_kick", {"channel_id": sid(current), "by": "Acesso ao servidor removido"})
+        await hub.set_voice(user_id, None, {})
+
+
+async def refresh_channel_voice(channel_id: int) -> None:
+    """Aplica imediatamente mudanças de cargos/permissões a quem está na call."""
+    for user_id in list(hub.voice.get(channel_id, {})):
+        ch = await can_access_channel(user_id, channel_id)
+        if not ch:
+            await revoke_voice_participant(channel_id, user_id, "Você perdeu acesso a esta call.")
+            continue
+        await apply_permissions(channel_id, user_id, await mods_of(ch["server_id"], user_id))
 
 
 # ------------------------------------------------------------------ quem pode mexer em quem
@@ -143,7 +181,7 @@ async def move_member(server_id: str, user_id: str, body: MoveIn, me: Auth = Cur
     cid = await _server_voice_target(s, target, me.id)
     if cid is None:
         raise err(404, "Essa pessoa não está em nenhuma call do servidor.")
-    ch = await pool().fetchrow("SELECT server_id, type, name FROM channels WHERE id = $1", to)
+    ch = await can_access_channel(target, to)
     if not ch or ch["server_id"] != s or ch["type"] != "voice":
         raise err(404, "Canal de voz não encontrado.")
     if to == cid:
