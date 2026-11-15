@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS files (
     still_path  TEXT,                       -- primeiro quadro, para imagens animadas
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE files ADD COLUMN IF NOT EXISTS stored_size BIGINT;
+UPDATE files SET stored_size = size WHERE stored_size IS NULL;
+ALTER TABLE files ALTER COLUMN stored_size SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS users (
     id             BIGINT PRIMARY KEY,

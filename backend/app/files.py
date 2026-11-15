@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import mimetypes
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +48,27 @@ INLINE_TYPES = {
     "text/plain",
 }
 PUBLIC_KINDS = {"avatar", "banner", "icon"}
+_upload_lock = asyncio.Lock()
+
+
+async def enforce_upload_budget(owner_id: int, incoming: int) -> None:
+    usage = await pool().fetchrow(
+        """SELECT COALESCE(SUM(stored_size), 0) AS bytes,
+                  COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour') AS recent
+           FROM files WHERE owner_id = $1""",
+        owner_id,
+    )
+    user_limit = settings.upload_user_quota_mb * MB
+    if int(usage["bytes"]) + incoming > user_limit:
+        raise err(413, f"Sua cota de arquivos chegou ao limite de {settings.upload_user_quota_mb} MB.")
+    if int(usage["recent"]) >= settings.upload_rate_per_hour:
+        raise err(429, f"Limite de {settings.upload_rate_per_hour} uploads por hora. Tente mais tarde.")
+    total = int(await pool().fetchval("SELECT COALESCE(SUM(stored_size), 0) FROM files") or 0)
+    if total + incoming > settings.upload_total_quota_mb * MB:
+        raise err(507, "O armazenamento de arquivos do servidor chegou ao limite.")
+    free = shutil.disk_usage(settings.upload_dir).free
+    if free - incoming < settings.upload_min_free_mb * MB:
+        raise err(507, "O servidor está preservando a reserva mínima de espaço em disco.")
 
 
 async def file_user(
@@ -152,6 +175,7 @@ async def save_upload(upload: UploadFile, kind: str, owner_id: int, *, clip: boo
     width = height = None
     animated = False
     still_rel: str | None = None
+    still_data: bytes | None = None
 
     if kind in IMAGE_KINDS:
         try:
@@ -170,7 +194,7 @@ async def save_upload(upload: UploadFile, kind: str, owner_id: int, *, clip: boo
         ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}[mime]
         if animated:
             still_rel = f"{kind}/{file_id}.still.png"
-            (settings.upload_dir / still_rel).write_bytes(_still_frame(im))
+            still_data = _still_frame(im)
     elif kind == "sound":
         ext = Path(original).suffix.lower()
         if ext not in AUDIO_TYPES:
@@ -189,12 +213,24 @@ async def save_upload(upload: UploadFile, kind: str, owner_id: int, *, clip: boo
                 mime = "application/octet-stream"
 
     rel = f"{kind}/{file_id}{ext}"
-    (settings.upload_dir / rel).write_bytes(data)
-    await pool().execute(
-        """INSERT INTO files (id, owner_id, kind, mime, size, name, width, height, animated, path, still_path)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
-        file_id, owner_id, kind, mime, len(data), original, width, height, animated, rel, still_rel,
-    )
+    path = settings.upload_dir / rel
+    still_path = settings.upload_dir / still_rel if still_rel else None
+    async with _upload_lock:
+        await enforce_upload_budget(owner_id, len(data) + len(still_data or b""))
+        try:
+            path.write_bytes(data)
+            if still_path and still_data:
+                still_path.write_bytes(still_data)
+            await pool().execute(
+                """INSERT INTO files (id, owner_id, kind, mime, size, stored_size, name, width, height, animated, path, still_path)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
+                file_id, owner_id, kind, mime, len(data), len(data) + len(still_data or b""), original, width, height, animated, rel, still_rel,
+            )
+        except Exception:
+            path.unlink(missing_ok=True)
+            if still_path:
+                still_path.unlink(missing_ok=True)
+            raise
     return {
         "id": sid(file_id),
         "url": file_url(file_id),

@@ -33,6 +33,10 @@ class Settings:
     frontend_url = env("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     cors_origins = [o.strip().rstrip("/") for o in env("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
     upload_dir = (ROOT / env("UPLOAD_DIR", "./uploads")).resolve()
+    upload_user_quota_mb = max(1, int(env("UPLOAD_USER_QUOTA_MB", "500")))
+    upload_total_quota_mb = max(upload_user_quota_mb, int(env("UPLOAD_TOTAL_QUOTA_MB", "8192")))
+    upload_min_free_mb = max(128, int(env("UPLOAD_MIN_FREE_MB", "1024")))
+    upload_rate_per_hour = max(1, int(env("UPLOAD_RATE_PER_HOUR", "60")))
     livekit_url = env("LIVEKIT_URL")
     livekit_key = env("LIVEKIT_API_KEY")
     livekit_secret = env("LIVEKIT_API_SECRET")
