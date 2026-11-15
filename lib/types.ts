@@ -81,6 +81,8 @@ export interface Server {
   owner_id: string;
   accent: string;
   hall_threshold: number;
+  /** segundos entre um hype e outro (0 = hype desligado) */
+  hype_cooldown?: number;
   /** frases de boas-vindas próprias, com {nome}; vazio = as padrão */
   welcome_lines: string[];
   icon: Media | null;
@@ -152,6 +154,8 @@ export interface VoiceMember {
 export interface Game {
   name: string;
   appid: string;
+  /** "app" quando veio do app de Windows (sem Steam) */
+  source?: "app";
 }
 
 export interface Sticker {
@@ -162,6 +166,9 @@ export interface Sticker {
   width: number | null;
   height: number | null;
   animated: boolean;
+  favorite?: boolean;
+  /** pasta da coleção ("" = sem pasta) */
+  folder?: string;
 }
 
 export interface Gif {

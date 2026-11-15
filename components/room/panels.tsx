@@ -102,8 +102,11 @@ export function SharePanel({
   onStart,
   onClose,
   freeTier = true,
+  clipOnly,
 }: {
   initial: ShareSettings;
+  /** gravar a própria tela só para clipes, sem transmitir (ligado = true) */
+  clipOnly?: { on: boolean; toggle: () => void };
   /** false quando o servidor de voz é próprio (sem franquia de GB) */
   freeTier?: boolean;
   /** quantas pessoas vão receber a tela (todo mundo menos você) */
@@ -215,6 +218,15 @@ export function SharePanel({
       <Primary type="button" onClick={() => onStart(s)}>
         Escolher o que compartilhar
       </Primary>
+      {clipOnly && (
+        <button
+          type="button"
+          onClick={clipOnly.toggle}
+          className="mt-2 w-full rounded-[10px] px-3 py-2 text-[12.5px] font-medium text-oat/70 hover:bg-oat/[0.06] hover:text-oat"
+        >
+          {clipOnly.on ? "Parar de gravar minha tela para clipes" : "Só gravar minha tela para clipes (ninguém vê)"}
+        </button>
+      )}
     </Panel>
   );
 }

@@ -234,6 +234,9 @@ CREATE TABLE IF NOT EXISTS stickers (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS stickers_user_file ON stickers (user_id, file_id);
+-- organizar a coleção: favoritas e pastas
+ALTER TABLE stickers ADD COLUMN IF NOT EXISTS favorite BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE stickers ADD COLUMN IF NOT EXISTS folder TEXT NOT NULL DEFAULT '';
 
 -- Steam: o que a pessoa está jogando
 ALTER TABLE users ADD COLUMN IF NOT EXISTS steam_id TEXT NOT NULL DEFAULT '';
@@ -249,3 +252,8 @@ CREATE TABLE IF NOT EXISTS webhooks (
 );
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS webhook_id BIGINT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_name TEXT NOT NULL DEFAULT '';
+-- comandos com barra dos bots: a API chama o endereço do bot quando alguém usa um deles
+ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS command_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS commands TEXT[] NOT NULL DEFAULT '{}';
+-- hype: de quanto em quanto tempo dá para chamar a turma (0 = desligado)
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS hype_cooldown INT NOT NULL DEFAULT 120;

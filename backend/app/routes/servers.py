@@ -106,6 +106,7 @@ async def server_out(server_id: int) -> dict:
         "owner_id": sid(s["owner_id"]),
         "accent": s["accent"],
         "hall_threshold": s["hall_threshold"],
+        "hype_cooldown": s["hype_cooldown"],
         "welcome_lines": list(s["welcome_lines"] or []),
         "icon": media(s["icon_id"], s["icon_animated"]),
         "banner": media(s["banner_id"], s["banner_animated"]),
@@ -162,6 +163,10 @@ class ServerPatch(BaseModel):
     accent: str | None = None
     hall_threshold: int | None = None
     welcome_lines: list[str] | None = None
+    hype_cooldown: int | None = None
+
+
+HYPE_CHOICES = {0, 30, 60, 120, 300, 600, 1800}
 
 
 @router.patch("/servers/{server_id}")
@@ -182,6 +187,10 @@ async def update_server(server_id: str, body: ServerPatch, me: Auth = CurrentUse
         if not 1 <= body.hall_threshold <= 50:
             raise err(400, "O Hall precisa de 1 a 50 pessoas.")
         await pool().execute("UPDATE servers SET hall_threshold = $1 WHERE id = $2", body.hall_threshold, s)
+    if body.hype_cooldown is not None:
+        if body.hype_cooldown not in HYPE_CHOICES:
+            raise err(400, "Tempo de hype inválido.")
+        await pool().execute("UPDATE servers SET hype_cooldown = $1 WHERE id = $2", body.hype_cooldown, s)
     if body.welcome_lines is not None:
         lines = [x.strip()[:120] for x in body.welcome_lines if x.strip()][:12]
         await pool().execute("UPDATE servers SET welcome_lines = $1 WHERE id = $2", lines, s)

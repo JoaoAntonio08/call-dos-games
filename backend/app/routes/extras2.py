@@ -39,13 +39,13 @@ MAX_STICKERS = 150
 
 async def stickers_of(user_id: int) -> list[dict]:
     rows = await pool().fetch(
-        """SELECT s.id, s.name, s.file_id, f.width, f.height, f.animated FROM stickers s JOIN files f ON f.id = s.file_id
+        """SELECT s.id, s.name, s.file_id, s.favorite, s.folder, f.width, f.height, f.animated FROM stickers s JOIN files f ON f.id = s.file_id
            WHERE s.user_id = $1 ORDER BY s.created_at DESC""",
         user_id,
     )
     return [
         {"id": sid(r["id"]), "name": r["name"], "file_id": sid(r["file_id"]), "url": file_url(r["file_id"]),
-         "width": r["width"], "height": r["height"], "animated": r["animated"]}
+         "width": r["width"], "height": r["height"], "animated": r["animated"], "favorite": r["favorite"], "folder": r["folder"]}
         for r in rows
     ]
 
@@ -86,6 +86,34 @@ async def save_sticker(body: SaveStickerIn, me: Auth = CurrentUser) -> list[dict
         "INSERT INTO stickers (id, user_id, name, file_id) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id, file_id) DO NOTHING",
         new_id(), me.id, name, fid,
     )
+    return await stickers_of(me.id)
+
+
+class StickerEditIn(BaseModel):
+    name: str | None = None
+    favorite: bool | None = None
+    folder: str | None = None
+
+
+@router.patch("/me/stickers/{sticker_id}")
+async def edit_sticker(sticker_id: str, body: StickerEditIn, me: Auth = CurrentUser) -> list[dict]:
+    """Renomear, favoritar ou mudar de pasta (pasta vazia = sem pasta)."""
+    st = parse_id(sticker_id)
+    if not await pool().fetchval("SELECT 1 FROM stickers WHERE id = $1 AND user_id = $2", st, me.id):
+        raise err(404, "Figurinha não encontrada.")
+    if body.name is not None:
+        name = body.name.strip()[:40]
+        if not name:
+            raise err(400, "Dê um nome para a figurinha.")
+        await pool().execute("UPDATE stickers SET name = $1 WHERE id = $2", name, st)
+    if body.favorite is not None:
+        await pool().execute("UPDATE stickers SET favorite = $1 WHERE id = $2", body.favorite, st)
+    if body.folder is not None:
+        folder = re.sub(r"\s+", " ", body.folder).strip()[:24]
+        if folder and folder not in {r["folder"] for r in await pool().fetch("SELECT DISTINCT folder FROM stickers WHERE user_id = $1", me.id)}:
+            if await pool().fetchval("SELECT count(DISTINCT folder) FROM stickers WHERE user_id = $1 AND folder <> ''", me.id) >= 20:
+                raise err(400, "No máximo 20 pastas.")
+        await pool().execute("UPDATE stickers SET folder = $1 WHERE id = $2", folder, st)
     return await stickers_of(me.id)
 
 
@@ -201,8 +229,8 @@ class SteamIn(BaseModel):
 async def link_steam(body: SteamIn, me: Auth = CurrentUser) -> dict:
     if not body.profile.strip():
         await pool().execute("UPDATE users SET steam_id = '' WHERE id = $1", me.id)
-        if hub.games.pop(me.id, None):
-            await hub.to_audience(me.id, "game", {"user_id": sid(me.id), "game": None})
+        if hub.steam_games.pop(me.id, None):
+            await hub.update_game(me.id)
         return {"steam": None}
     if not settings.steam_key:
         raise err(503, "A Steam não está ligada neste servidor (falta STEAM_API_KEY).")
@@ -264,19 +292,36 @@ async def steam_loop() -> None:
             rows = await pool().fetch("SELECT id, steam_id FROM users WHERE steam_id <> ''")
             online = {r["id"]: r["steam_id"] for r in rows if hub.online(r["id"])}
             found = await summaries(list(set(online.values()))) if online else {}
-            for uid in set(hub.games) | set(online):
+            for uid in set(hub.steam_games) | set(online):
                 g = game_of(found.get(online[uid])) if uid in online else None
-                if g != hub.games.get(uid):
+                if g != hub.steam_games.get(uid):
                     if g:
-                        hub.games[uid] = g
+                        hub.steam_games[uid] = g
                     else:
-                        hub.games.pop(uid, None)
-                    await hub.to_audience(uid, "game", {"user_id": sid(uid), "game": g})
+                        hub.steam_games.pop(uid, None)
+                    await hub.update_game(uid)
         except asyncio.CancelledError:
             raise
         except Exception:
             pass
         await asyncio.sleep(STEAM_POLL)
+
+
+# ------------------------------------------------------------------ jogo achado pelo app de Windows
+class GameIn(BaseModel):
+    name: str | None = None
+
+
+@router.put("/me/game")
+async def set_app_game(body: GameIn, me: Auth = CurrentUser) -> dict:
+    """O app de Windows vê qual jogo está aberto no PC e avisa aqui (some quando o app desconecta)."""
+    name = re.sub(r"\s+", " ", (body.name or "")).strip()[:80]
+    if name:
+        hub.app_games[me.id] = {"name": name, "appid": "", "source": "app"}
+    else:
+        hub.app_games.pop(me.id, None)
+    await hub.update_game(me.id)
+    return {"game": hub.games.get(me.id)}
 
 
 # ------------------------------------------------------------------ webhooks (bots)
@@ -296,8 +341,11 @@ async def _text_channel_admin(channel_id: int, user_id: int) -> dict:
 async def list_webhooks(channel_id: str, me: Auth = CurrentUser) -> list[dict]:
     cid = parse_id(channel_id)
     await _text_channel_admin(cid, me.id)
-    rows = await pool().fetch("SELECT id, name, created_at FROM webhooks WHERE channel_id = $1 ORDER BY created_at", cid)
-    return [{"id": sid(r["id"]), "name": r["name"], "created_at": r["created_at"].isoformat()} for r in rows]
+    rows = await pool().fetch("SELECT id, name, created_at, command_url, commands FROM webhooks WHERE channel_id = $1 ORDER BY created_at", cid)
+    return [
+        {"id": sid(r["id"]), "name": r["name"], "created_at": r["created_at"].isoformat(), "command_url": r["command_url"], "commands": list(r["commands"])}
+        for r in rows
+    ]
 
 
 class WebhookIn(BaseModel):

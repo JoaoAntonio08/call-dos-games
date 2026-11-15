@@ -64,14 +64,15 @@ def _still_frame(im: Image.Image) -> bytes:
 
 
 CLIP_LIMIT = 80 * MB
-CLIP_TYPES = {".mp4": "video/mp4", ".webm": "video/webm"}
+# clipe sem tela nenhuma sai só com o áudio da call
+CLIP_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".m4a": "audio/mp4", ".weba": "audio/webm"}
 
 
 async def save_upload(upload: UploadFile, kind: str, owner_id: int, *, clip: bool = False) -> dict[str, Any]:
     if kind not in LIMITS:
         raise err(400, "Tipo de arquivo desconhecido.")
     if clip and Path(upload.filename or "").suffix.lower() not in CLIP_TYPES:
-        raise err(400, "Clipe precisa ser MP4 ou WebM.")
+        raise err(400, "Clipe precisa ser MP4, WebM ou áudio (M4A/WebA).")
     data = await read_limited(upload, CLIP_LIMIT if clip else LIMITS[kind])
     file_id = new_id()
     folder = settings.upload_dir / kind

@@ -41,6 +41,8 @@ export function askNotifications() {
 
 export function HypeButton({ channelId, compact }: { channelId: string; compact?: boolean }) {
   const [busy, setBusy] = useState(false);
+  const off = useStore((s) => Object.values(s.servers).find((sv) => sv.channels.some((c) => c.id === channelId))?.hype_cooldown === 0);
+  if (off) return null;
   return (
     <button
       type="button"

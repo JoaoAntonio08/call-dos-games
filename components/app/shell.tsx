@@ -18,6 +18,7 @@ import { ProfilePopover } from "./profile";
 import { UserMenu } from "./user-menu";
 import { UpdateBanner } from "./update-banner";
 import { HypeAlert } from "./hype";
+import { GameReporter } from "./jogo-app";
 import { Modals } from "./modals";
 
 export function Shell() {
@@ -139,6 +140,7 @@ export function Shell() {
       <ProfilePopover />
       <UserMenu />
       <HypeAlert />
+      <GameReporter />
       <Modals />
       {toastMsg && (
         <div key={toastMsg.id} role="status" className="slide-in fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">

@@ -13,6 +13,7 @@ import { BadgeRow } from "./badges";
 import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
 import { keyName } from "./user-bar";
 import { BotsTab, SteamSettings } from "./integracoes";
+import { DesktopGameSettings } from "./jogo-app";
 import { Room } from "livekit-client";
 
 export function Modals() {
@@ -366,6 +367,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         <div className="max-w-xl">
           <H>Jogos</H>
           <SteamSettings />
+          <DesktopGameSettings />
         </div>
       )}
       {tab === "conta" && <AccountTab />}
@@ -802,7 +804,7 @@ function VoiceTab() {
       </Section>
       <Section
         title="Clipes"
-        hint="Enquanto alguém compartilha a tela, o navegador guarda os últimos ~40 segundos (com o som da tela e as vozes). O botão de tesoura ou Alt+C salva o lance no canal de clipes. Em PC mais fraco, desligue."
+        hint="Na call, o app guarda os últimos ~40 segundos e o botão de tesoura (ou Alt+C) salva o lance no canal de clipes. Com alguém em live, sai o vídeo da live; sem live, sai o áudio da call, ou a sua tela se você ligar “Só gravar minha tela para clipes” no botão de compartilhar (ninguém vê). No app de Windows, Alt+Shift+C clipa mesmo com o jogo na frente. Em PC mais fraco, desligue."
       >
         <label className="flex items-center justify-between gap-4 py-1">
           <span className="text-[14.5px] font-medium">Guardar os últimos segundos para clipar</span>
@@ -1005,6 +1007,33 @@ function ServerGeneral({ server, owner }: { server: Server; owner: boolean }) {
               }`}
             >
               {n}
+            </button>
+          ))}
+        </div>
+      </Section>
+      <Section title="Hype" hint="O botão de hype chama todo mundo do servidor para a call. Aqui você escolhe de quanto em quanto tempo alguém pode chamar de novo.">
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              [30, "30 s"],
+              [60, "1 min"],
+              [120, "2 min"],
+              [300, "5 min"],
+              [600, "10 min"],
+              [1800, "30 min"],
+              [0, "Desligado"],
+            ] as const
+          ).map(([n, label]) => (
+            <button
+              key={n}
+              type="button"
+              aria-pressed={(server.hype_cooldown ?? 120) === n}
+              onClick={() => void patch({ hype_cooldown: n })}
+              className={`press h-9 rounded-[10px] px-3 text-[14px] font-semibold ${
+                (server.hype_cooldown ?? 120) === n ? "bg-ember text-white" : "bg-cocoa-0 text-oat/70 hover:text-oat"
+              }`}
+            >
+              {label}
             </button>
           ))}
         </div>

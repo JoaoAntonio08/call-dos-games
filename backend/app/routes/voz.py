@@ -142,7 +142,6 @@ async def move_member(server_id: str, user_id: str, body: MoveIn, me: Auth = Cur
 
 
 # ------------------------------------------------------------------ hype: chama todo mundo para a call
-HYPE_COOLDOWN = 120
 _last_hype: dict[int, float] = {}
 
 
@@ -154,8 +153,11 @@ async def hype(channel_id: str, me: Auth = CurrentUser) -> dict:
         raise err(404, "Canal de voz não encontrado.")
     s = ch["server_id"]
     await require_member(s, me.id)
+    cooldown = await pool().fetchval("SELECT hype_cooldown FROM servers WHERE id = $1", s)
+    if not cooldown:
+        raise err(403, "O hype está desligado neste servidor.")
     now = time.monotonic()
-    wait = HYPE_COOLDOWN - (now - _last_hype.get(s, -1e9))
+    wait = cooldown - (now - _last_hype.get(s, -1e9))
     if wait > 0:
         raise err(429, f"Alguém acabou de chamar a turma. Dá para chamar de novo em {int(wait) + 1} s.")
     _last_hype[s] = now

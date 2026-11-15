@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bookmark, Loader2, Plus, Search, X } from "lucide-react";
+import { Bookmark, Loader2, Pencil, Plus, Search, Star, Trash2, X } from "lucide-react";
 import { api, errorText, upload } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { toast } from "@/lib/ui";
@@ -83,10 +83,17 @@ export function StickerPicker({ onSticker, onGif }: { onSticker: (s: Sticker) =>
   );
 }
 
+const FAV = "\u0000fav";
+const NEW_FOLDER = "\u0000nova";
+
 function MyStickers({ onPick }: { onPick: (s: Sticker) => void }) {
   const list = useStickers();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  // "" = todas, FAV = favoritas, senão o nome da pasta
+  const [view, setView] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
 
   async function add(files: FileList) {
     setBusy(true);
@@ -96,7 +103,10 @@ function MyStickers({ onPick }: { onPick: (s: Sticker) => void }) {
           toast(`${f.name} passa de 3 MB.`);
           continue;
         }
-        setCache(await upload<Sticker[]>("/me/stickers", f));
+        let next = await upload<Sticker[]>("/me/stickers", f);
+        // subiu dentro de uma pasta: a figurinha nova já vai para ela
+        if (view && view !== FAV && next[0]) next = await api<Sticker[]>(`/me/stickers/${next[0].id}`, { method: "PATCH", json: { folder: view } });
+        setCache(next);
       }
     } catch (e) {
       toast(errorText(e));
@@ -105,48 +115,181 @@ function MyStickers({ onPick }: { onPick: (s: Sticker) => void }) {
     }
   }
 
-  async function remove(s: Sticker) {
+  const folders = [...new Set((list ?? []).map((s) => s.folder || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const hasFav = (list ?? []).some((s) => s.favorite);
+  const needle = q.trim().toLowerCase();
+  const shown = (list ?? [])
+    .filter((s) => (view === FAV ? s.favorite : view ? s.folder === view : true))
+    .filter((s) => !needle || s.name.toLowerCase().includes(needle))
+    .sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite));
+  const edit = editing ? list?.find((s) => s.id === editing) : undefined;
+  const tabs: [string, string][] = [["", "Todas"], ...(hasFav ? ([[FAV, "★ Favoritas"]] as [string, string][]) : []), ...folders.map((f) => [f, f] as [string, string])];
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {(list?.length ?? 0) > 0 && (
+        <>
+          <label className="flex h-9 shrink-0 items-center gap-2 rounded-[10px] bg-cocoa-3 px-3">
+            <Search className="size-4 text-oat/40" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar nas suas figurinhas"
+              className="w-full bg-transparent text-[14px] outline-none placeholder:text-oat/30"
+              aria-label="Buscar nas suas figurinhas"
+            />
+          </label>
+          <div className="mt-2 flex shrink-0 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Pastas">
+            {tabs.map(([id, label]) => (
+              <button
+                key={id || "todas"}
+                type="button"
+                role="tab"
+                aria-selected={view === id}
+                onClick={() => setView(id)}
+                className={`shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-semibold ${view === id ? "bg-ember text-white" : "bg-cocoa-3 text-oat/60 hover:text-oat"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+        <div className="grid grid-cols-4 gap-1.5">
+          <button
+            type="button"
+            onClick={() => input.current?.click()}
+            disabled={busy}
+            className="grid aspect-square place-items-center rounded-[12px] border-2 border-dashed border-oat/20 text-oat/50 hover:border-ember hover:text-ember"
+            aria-label="Adicionar figurinha"
+            title="Adicionar figurinha (GIF, WebP ou PNG, até 3 MB)"
+          >
+            {busy ? <Loader2 className="size-6 animate-spin" /> : <Plus className="size-6" />}
+          </button>
+          {shown.map((s) => (
+            <div key={s.id} className="group relative aspect-square">
+              <button
+                type="button"
+                onClick={() => onPick(s)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setEditing(s.id);
+                }}
+                className={`press size-full rounded-[12px] p-1 hover:bg-cocoa-3 ${editing === s.id ? "bg-cocoa-3 ring-2 ring-ember" : ""}`}
+                aria-label={`Mandar figurinha ${s.name}`}
+                title={`${s.name} (botão direito para editar)`}
+              >
+                <img src={s.url} alt={s.name} loading="lazy" className="size-full object-contain" />
+              </button>
+              {s.favorite && <Star aria-hidden className="pointer-events-none absolute left-0.5 top-0.5 size-3.5 fill-honey text-honey" />}
+              <button
+                type="button"
+                onClick={() => setEditing(editing === s.id ? null : s.id)}
+                aria-label={`Editar figurinha ${s.name}`}
+                className="absolute -right-1 -top-1 hidden size-5 place-items-center rounded-full bg-cocoa-5 text-oat group-focus-within:grid group-hover:grid"
+              >
+                <Pencil className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        {list && list.length === 0 && (
+          <p className="mt-4 text-center text-[13px] text-oat/50">Sua coleção está vazia. Clique no + para subir figurinhas (GIFs animados funcionam), ou salve as que a turma mandar.</p>
+        )}
+        {list && list.length > 0 && shown.length === 0 && <p className="mt-4 text-center text-[13px] text-oat/50">Nenhuma figurinha aqui.</p>}
+      </div>
+      {edit && <StickerEditor key={edit.id} s={edit} folders={folders} onClose={() => setEditing(null)} />}
+      <input ref={input} type="file" accept="image/gif,image/webp,image/png,image/jpeg" multiple hidden onChange={(e) => e.target.files && void add(e.target.files)} />
+    </div>
+  );
+}
+
+function StickerEditor({ s, folders, onClose }: { s: Sticker; folders: string[]; onClose: () => void }) {
+  const [name, setName] = useState(s.name);
+  const [folder, setFolder] = useState(s.folder ?? "");
+  const [newFolder, setNewFolder] = useState(false);
+
+  async function patch(body: { name?: string; favorite?: boolean; folder?: string }) {
     try {
-      setCache(await api<Sticker[]>(`/me/stickers/${s.id}`, { method: "DELETE" }));
+      setCache(await api<Sticker[]>(`/me/stickers/${s.id}`, { method: "PATCH", json: body }));
+      return true;
     } catch (e) {
       toast(errorText(e));
+      return false;
     }
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="grid grid-cols-4 gap-1.5">
+    <form
+      className="mt-2 shrink-0 space-y-2 rounded-[12px] bg-cocoa-3 p-2.5"
+      aria-label={`Editar figurinha ${s.name}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void patch({ name: name.trim() || s.name, folder: folder.trim() }).then((ok) => ok && onClose());
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} className="field h-9 flex-1 text-[13.5px]" aria-label="Nome da figurinha" />
         <button
           type="button"
-          onClick={() => input.current?.click()}
-          disabled={busy}
-          className="grid aspect-square place-items-center rounded-[12px] border-2 border-dashed border-oat/20 text-oat/50 hover:border-ember hover:text-ember"
-          aria-label="Adicionar figurinha"
-          title="Adicionar figurinha (GIF, WebP ou PNG, até 3 MB)"
+          onClick={() => void patch({ favorite: !s.favorite })}
+          aria-pressed={!!s.favorite}
+          aria-label={s.favorite ? "Tirar das favoritas" : "Favoritar"}
+          title={s.favorite ? "Tirar das favoritas" : "Favoritar"}
+          className="grid size-9 shrink-0 place-items-center rounded-[9px] hover:bg-cocoa-5"
         >
-          {busy ? <Loader2 className="size-6 animate-spin" /> : <Plus className="size-6" />}
+          <Star className={`size-4 ${s.favorite ? "fill-honey text-honey" : "text-oat/60"}`} />
         </button>
-        {list?.map((s) => (
-          <div key={s.id} className="group relative aspect-square">
-            <button type="button" onClick={() => onPick(s)} className="press size-full rounded-[12px] p-1 hover:bg-cocoa-3" aria-label={`Mandar figurinha ${s.name}`} title={s.name}>
-              <img src={s.url} alt={s.name} loading="lazy" className="size-full object-contain" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void remove(s)}
-              aria-label={`Apagar figurinha ${s.name}`}
-              className="absolute -right-1 -top-1 hidden size-5 place-items-center rounded-full bg-rust text-oat group-hover:grid"
-            >
-              <X className="size-3" />
-            </button>
-          </div>
-        ))}
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              setCache(await api<Sticker[]>(`/me/stickers/${s.id}`, { method: "DELETE" }));
+              onClose();
+            } catch (e) {
+              toast(errorText(e));
+            }
+          }}
+          aria-label={`Apagar figurinha ${s.name}`}
+          title="Apagar"
+          className="grid size-9 shrink-0 place-items-center rounded-[9px] text-rust hover:bg-rust/15"
+        >
+          <Trash2 className="size-4" />
+        </button>
       </div>
-      {list && list.length === 0 && (
-        <p className="mt-4 text-center text-[13px] text-oat/50">Sua coleção está vazia. Clique no + para subir figurinhas (GIFs animados funcionam), ou salve as que a turma mandar.</p>
-      )}
-      <input ref={input} type="file" accept="image/gif,image/webp,image/png,image/jpeg" multiple hidden onChange={(e) => e.target.files && void add(e.target.files)} />
-    </div>
+      <div className="flex items-center gap-2">
+        {newFolder ? (
+          <input value={folder} onChange={(e) => setFolder(e.target.value)} maxLength={24} placeholder="Nome da pasta nova" className="field h-9 flex-1 text-[13.5px]" aria-label="Nome da pasta nova" autoFocus />
+        ) : (
+          <select
+            value={folder}
+            onChange={(e) => {
+              if (e.target.value === NEW_FOLDER) {
+                setNewFolder(true);
+                setFolder("");
+              } else setFolder(e.target.value);
+            }}
+            className="field h-9 flex-1 py-0 text-[13.5px]"
+            aria-label="Pasta"
+          >
+            <option value="">Sem pasta</option>
+            {folders.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+            <option value={NEW_FOLDER}>+ Pasta nova…</option>
+          </select>
+        )}
+        <button type="submit" className="btn-ember h-9 shrink-0 px-3 text-[13px]">
+          Salvar
+        </button>
+        <button type="button" onClick={onClose} aria-label="Fechar edição" className="grid size-9 shrink-0 place-items-center rounded-[9px] text-oat/60 hover:bg-cocoa-5">
+          <X className="size-4" />
+        </button>
+      </div>
+    </form>
   );
 }
 

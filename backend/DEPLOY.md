@@ -158,6 +158,12 @@ Sem configurar, o link de redefinir aparece em `journalctl -u calldosgames-api`,
 
 Depois: `sudo systemctl restart calldosgames-api`. Sem as chaves, o resto funciona e o app só avisa que essas partes estão desligadas. Cada pessoa liga a própria Steam em **Configurações → Jogos**, colando o link do perfil (o perfil e os detalhes de jogo precisam estar públicos na Steam).
 
+Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reconhece o jogo aberto no PC (lista em `desktop/jogos.js`, e cada um pode adicionar o seu em **Configurações → Jogos**).
+
+### Comandos de bot
+
+`/dado`, `/moeda`, `/sortear`, `/escolher` e `/ajuda` já vêm prontos. Em **Configurações do servidor → Bots**, cada webhook pode ganhar comandos próprios e um endereço `https://` público: quando alguém usa o comando, a API faz um `POST` JSON (`{type, command, args, user, channel_id, server_id, message_id, timestamp}`) para esse endereço, com o cabeçalho `X-CDG-Signature: sha256=<HMAC-SHA256 do corpo>`, usando como chave o sha256 (em hexadecimal) do token do webhook. A resposta no formato do Discord (`{"content": "..."}`) vira mensagem do bot; resposta vazia (204) deixa o bot responder depois pelo próprio webhook. A API só chama endereços públicos (nada de `localhost` ou rede interna).
+
 ## 12. Backup
 
 ```bash

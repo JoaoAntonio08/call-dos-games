@@ -109,6 +109,34 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
     });
   }, [x, y]);
 
+  // abre já com o primeiro item focado: setas andam, letra sublinhada faz a ação
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus({ preventScroll: true });
+  }, []);
+
+  function onMenuKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    const root = ref.current;
+    if (!root || e.ctrlKey || e.metaKey || e.altKey) return;
+    const items = [...root.querySelectorAll<HTMLElement>('[role^="menuitem"], input[type="range"]')];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const go = (i: number) => {
+      e.preventDefault();
+      items[(i + items.length) % items.length]?.focus();
+    };
+    if (e.key === "ArrowDown") return go(at + 1);
+    if (e.key === "ArrowUp") return go(at < 0 ? items.length - 1 : at - 1);
+    if (e.key === "Home") return go(0);
+    if (e.key === "End") return go(items.length - 1);
+    if (e.key === "Tab") return go(at + (e.shiftKey ? -1 : 1));
+    if (e.key.length === 1) {
+      const hit = root.querySelector<HTMLElement>(`[data-hotkey="${e.key.toLowerCase()}"]`);
+      if (hit) {
+        e.preventDefault();
+        hit.click();
+      }
+    }
+  }
+
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) closeUserMenu();
@@ -154,6 +182,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
       className="pop-in fixed z-[70] w-[248px] overflow-y-auto rounded-[14px] bg-cocoa-0 p-1.5 text-[13.5px] shadow-[0_12px_40px_rgb(0_0_0/0.45)]"
       style={{ left: pos.left, top: pos.top, maxHeight: "calc(100svh - 16px)" }}
       onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={onMenuKey}
     >
       <div className="flex items-center gap-2.5 px-2 pb-2 pt-1.5">
         <Avatar name={user.display_name} avatar={user.avatar} accent={user.accent} size={32} />
@@ -171,6 +200,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
 
       <Item
         icon={<UserRound />}
+        hotkey="p"
         onClick={() => {
           const r = new DOMRect(x, y, 0, 0);
           useUI.setState({ userMenu: null, profile: { id, rect: r, serverId } });
@@ -181,6 +211,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
       {!isMe && !user.bot && (
         <Item
           icon={<MessageCircle />}
+          hotkey="c"
           onClick={() => {
             closeUserMenu();
             void openDm(id);
@@ -209,7 +240,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
               aria-label={`Volume de ${user.display_name} para você`}
             />
           </div>
-          <Item icon={v.localMute[id] ? <Volume2 /> : <VolumeX />} onClick={() => v.setLocalMute(id, !v.localMute[id])} checked={!!v.localMute[id]}>
+          <Item icon={v.localMute[id] ? <Volume2 /> : <VolumeX />} hotkey="s" onClick={() => v.setLocalMute(id, !v.localMute[id])} checked={!!v.localMute[id]}>
             Silenciar para mim
           </Item>
         </>
@@ -219,10 +250,10 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
         <>
           <Sep />
           <p className="label px-2 pb-1 pt-1.5 text-oat/40">Para todos (admin)</p>
-          <Item icon={<MicOff />} onClick={() => void setMods({ mute: !state?.smute })} checked={!!state?.smute}>
+          <Item icon={<MicOff />} hotkey="m" onClick={() => void setMods({ mute: !state?.smute })} checked={!!state?.smute}>
             Mutar para todos
           </Item>
-          <Item icon={<HeadphoneOff />} onClick={() => void setMods({ deaf: !state?.sdeaf })} checked={!!state?.sdeaf}>
+          <Item icon={<HeadphoneOff />} hotkey="e" onClick={() => void setMods({ deaf: !state?.sdeaf })} checked={!!state?.sdeaf}>
             Ensurdecer para todos
           </Item>
           <GainSlider initial={state?.gain ?? 1} name={user.display_name} onCommit={(g) => void setMods({ gain: g })} />
@@ -248,6 +279,7 @@ function MenuBody({ id, x, y, serverId }: { id: string; x: number; y: number; se
           <Sep />
           <Item
             icon={<PhoneOff />}
+            hotkey="d"
             danger
             onClick={async () => {
               closeUserMenu();
@@ -295,19 +327,37 @@ function GainSlider({ initial, name, onCommit }: { initial: number; name: string
   );
 }
 
-function Item({ icon, children, onClick, danger, checked }: { icon: React.ReactNode; children: React.ReactNode; onClick: () => void; danger?: boolean; checked?: boolean }) {
+function Item({
+  icon,
+  children,
+  onClick,
+  danger,
+  checked,
+  hotkey,
+}: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  checked?: boolean;
+  /** tecla que faz a ação com o menu aberto */
+  hotkey?: string;
+}) {
   return (
     <button
       type="button"
       role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
       aria-checked={checked}
+      aria-keyshortcuts={hotkey?.toUpperCase()}
+      data-hotkey={hotkey}
       onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-[9px] px-2 py-[7px] text-left [&_svg]:size-4 [&_svg]:shrink-0 ${
-        danger ? "text-[#ff8a8f] hover:bg-rust hover:text-oat" : "text-oat/85 hover:bg-ember hover:text-white"
+      className={`flex w-full items-center gap-2.5 rounded-[9px] px-2 py-[7px] text-left outline-none [&_svg]:size-4 [&_svg]:shrink-0 ${
+        danger ? "text-[#ff8a8f] hover:bg-rust hover:text-oat focus-visible:bg-rust focus-visible:text-oat" : "text-oat/85 hover:bg-ember hover:text-white focus-visible:bg-ember focus-visible:text-white"
       }`}
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
+      {hotkey && <kbd className="font-sans text-[11px] uppercase opacity-45">{hotkey}</kbd>}
       {checked !== undefined && (
         <span className={`grid size-4 place-items-center rounded-[5px] border ${checked ? "border-ember bg-ember" : "border-oat/30"}`}>
           {checked && <span className="size-1.5 rounded-full bg-white" />}

@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Track } from "livekit-client";
 
 /* ------------------------------------------------------------------ */
-/* Clipar momento: guarda sempre os últimos ~40 s da tela compartilhada */
-/* (com o som da tela e as vozes da call) para salvar depois do lance.   */
+/* Clipar momento: guarda sempre os últimos ~40 s da call para salvar   */
+/* depois do lance. Com tela (a live de alguém ou a sua tela só para     */
+/* clipes) vira vídeo; sem tela nenhuma, vira áudio com as vozes.        */
 /*                                                                      */
 /* Um arquivo de vídeo só pode começar num ponto de cabeçalho, então     */
 /* rodam dois gravadores defasados em meia janela: na hora de clipar,    */
@@ -15,9 +16,21 @@ import type { Track } from "livekit-client";
 const WINDOW_MS = 40_000;
 const BITRATE = 4_000_000;
 
-function pickMime(): { mime: string; ext: "mp4" | "webm" } | null {
+export type ClipExt = "mp4" | "webm" | "m4a" | "weba";
+
+function pickMime(kind: "video" | "audio"): { mime: string; ext: ClipExt } | null {
   if (typeof MediaRecorder === "undefined") return null;
-  const options: [string, "mp4" | "webm"][] = [
+  if (kind === "audio") {
+    const audio: [string, ClipExt][] = [
+      ["audio/webm;codecs=opus", "weba"],
+      ["audio/mp4;codecs=mp4a.40.2", "m4a"],
+      ["audio/mp4", "m4a"],
+      ["audio/webm", "weba"],
+    ];
+    for (const [mime, ext] of audio) if (MediaRecorder.isTypeSupported(mime)) return { mime, ext };
+    return null;
+  }
+  const options: [string, ClipExt][] = [
     ["video/mp4;codecs=avc1.640028,mp4a.40.2", "mp4"],
     ["video/mp4;codecs=avc1,mp4a.40.2", "mp4"],
     ["video/mp4", "mp4"],
@@ -40,25 +53,30 @@ interface Slot {
 
 export interface ClipResult {
   blob: Blob;
-  ext: "mp4" | "webm";
+  ext: ClipExt;
   seconds: number;
+  /** "audio" quando não tinha tela nenhuma para gravar */
+  kind: "video" | "audio";
 }
 
-export function useClipper({ enabled, video, audio }: { enabled: boolean; video?: Track; audio: Track[] }) {
+export function useClipper({ enabled, video, audio, extraAudio = [] }: { enabled: boolean; video?: MediaStreamTrack; audio: Track[]; extraAudio?: MediaStreamTrack[] }) {
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const ctxRef = useRef<AudioContext | null>(null);
   const destRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const sourcesRef = useRef(new Map<string, MediaStreamAudioSourceNode>());
   const slotsRef = useRef<Slot[]>([]);
-  const [format] = useState(pickMime);
+  const [formats] = useState(() => ({ video: pickMime("video"), audio: pickMime("audio") }));
   const streamRef = useRef<MediaStream | null>(null);
 
-  const videoTrack = enabled ? video?.mediaStreamTrack : undefined;
+  const videoTrack = enabled && video?.readyState !== "ended" ? video : undefined;
+  const kind: "video" | "audio" = videoTrack ? "video" : "audio";
+  const format = formats[kind];
 
   /* ---------------- mixer de áudio (tela + vozes) ---------------- */
+  // os efeitos rodam na ordem em que aparecem: este cria o mixer antes dos de baixo usarem
   useEffect(() => {
-    if (!videoTrack) return;
+    if (!enabled) return;
     const ctx = ctxRef.current ?? new AudioContext();
     ctxRef.current = ctx;
     destRef.current ??= ctx.createMediaStreamDestination();
@@ -72,14 +90,15 @@ export function useClipper({ enabled, video, audio }: { enabled: boolean; video?
       keep.stop();
       keep.disconnect();
     };
-  }, [videoTrack]);
+  }, [enabled]);
 
-  const audioKey = audio.map((t) => t.mediaStreamTrack?.id).join(",");
+  const allAudio = [...audio.map((t) => t.mediaStreamTrack).filter((t): t is MediaStreamTrack => !!t), ...extraAudio];
+  const audioKey = allAudio.map((t) => t.id).join(",");
   useEffect(() => {
     const ctx = ctxRef.current;
     const dest = destRef.current;
-    if (!videoTrack || !ctx || !dest) return;
-    const want = new Map(audio.filter((t) => t.mediaStreamTrack).map((t) => [t.mediaStreamTrack.id, t.mediaStreamTrack]));
+    if (!enabled || !ctx || !dest) return;
+    const want = new Map(allAudio.map((t) => [t.id, t]));
     for (const [id, node] of sourcesRef.current) {
       if (!want.has(id)) {
         node.disconnect();
@@ -98,17 +117,17 @@ export function useClipper({ enabled, video, audio }: { enabled: boolean; video?
     }
     if (ctx.state === "suspended") void ctx.resume().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioKey, videoTrack]);
+  }, [audioKey, enabled]);
 
   /* ---------------- gravadores defasados ---------------- */
   useEffect(() => {
     const fmt = format;
     const dest = destRef.current;
-    if (!videoTrack || !fmt || !dest) {
+    if (!enabled || !fmt || !dest) {
       setReady(false);
       return;
     }
-    const stream = new MediaStream([videoTrack, ...dest.stream.getAudioTracks()]);
+    const stream = new MediaStream([...(videoTrack ? [videoTrack] : []), ...dest.stream.getAudioTracks()]);
     streamRef.current = stream;
     let alive = true;
 
@@ -116,7 +135,7 @@ export function useClipper({ enabled, video, audio }: { enabled: boolean; video?
       if (!alive) return;
       let rec: MediaRecorder;
       try {
-        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: BITRATE, audioBitsPerSecond: 128_000 });
+        rec = new MediaRecorder(stream, videoTrack ? { mimeType: fmt.mime, videoBitsPerSecond: BITRATE, audioBitsPerSecond: 128_000 } : { mimeType: fmt.mime, audioBitsPerSecond: 128_000 });
       } catch {
         setReady(false);
         return;
@@ -158,7 +177,7 @@ export function useClipper({ enabled, video, audio }: { enabled: boolean; video?
       slotsRef.current = [];
       setReady(false);
     };
-  }, [videoTrack, format]);
+  }, [enabled, videoTrack, format]);
 
   // sai da call / desliga: fecha o mixer
   useEffect(() => {
@@ -182,8 +201,8 @@ export function useClipper({ enabled, video, audio }: { enabled: boolean; video?
       slot.rec!.stop();
     });
     setBusy(false);
-    return blob && blob.size > 0 ? { blob, ext: fmt.ext, seconds } : null;
-  }, [format]);
+    return blob && blob.size > 0 ? { blob, ext: fmt.ext, seconds, kind } : null;
+  }, [format, kind]);
 
-  return { supported: !!format, ready, busy, clip };
+  return { supported: !!format, ready, busy, clip, kind };
 }

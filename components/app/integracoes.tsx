@@ -147,6 +147,57 @@ interface Hook {
   id: string;
   name: string;
   created_at: string;
+  command_url: string;
+  commands: string[];
+}
+
+/** Comandos com barra de um bot: a API chama o endereço dele quando alguém usa. */
+function HookCommands({ hook, onSaved }: { hook: Hook; onSaved: (h: Hook) => void }) {
+  const [open, setOpen] = useState(false);
+  const [cmds, setCmds] = useState(hook.commands.map((c) => `/${c}`).join(", "));
+  const [url, setUrl] = useState(hook.command_url);
+  const [error, setError] = useState("");
+  if (!open) {
+    return (
+      <button type="button" className="text-[12.5px] text-oat/55 hover:text-oat hover:underline" onClick={() => setOpen(true)}>
+        {hook.commands.length ? `Comandos: ${hook.commands.map((c) => `/${c}`).join(", ")}` : "Adicionar comandos"}
+      </button>
+    );
+  }
+  return (
+    <form
+      className="mt-2 space-y-2"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setError("");
+        try {
+          const commands = cmds.split(/[\s,]+/).map((c) => c.replace(/^\//, "")).filter(Boolean);
+          const r = await api<{ command_url: string; commands: string[] }>(`/webhooks/${hook.id}`, { method: "PATCH", json: { command_url: url.trim(), commands } });
+          onSaved({ ...hook, ...r });
+          setOpen(false);
+          toast("Comandos do bot salvos.");
+        } catch (err) {
+          setError(errorText(err));
+        }
+      }}
+    >
+      <input className="field" value={cmds} onChange={(e) => setCmds(e.target.value)} placeholder="/clima, /meme" aria-label={`Comandos do bot ${hook.name}`} />
+      <input className="field font-mono text-[12.5px]" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://meu-bot.exemplo.com/comando" aria-label={`Endereço de comandos do bot ${hook.name}`} />
+      <Tip>
+        Quando alguém usa um desses comandos em qualquer canal do servidor, a API manda um POST com {"{command, args, user, channel_id}"} para o endereço,
+        assinado no cabeçalho <code>X-CDG-Signature</code> (HMAC-SHA256 com o sha256 do token do webhook). O que o bot responder ({"{\"content\": \"...\"}"}) aparece no canal.
+      </Tip>
+      <div className="flex gap-2">
+        <button type="submit" className="btn-ember h-9 px-3.5 text-[13.5px]">
+          Salvar
+        </button>
+        <button type="button" className="btn-quiet h-9 px-3.5 text-[13.5px]" onClick={() => setOpen(false)}>
+          Cancelar
+        </button>
+      </div>
+      <FormError>{error}</FormError>
+    </form>
+  );
 }
 
 export function BotsTab({ server }: { server: Server }) {
@@ -190,7 +241,7 @@ export function BotsTab({ server }: { server: Server }) {
     <div className="max-w-2xl">
       <h2 className="mb-5 font-display text-[28px] font-semibold">Bots</h2>
       <p className="-mt-3 mb-5 text-[14px] leading-relaxed text-oat/55">
-        Um <b>webhook</b> é um link secreto que deixa um bot ou serviço de fora mandar mensagens num canal. Funciona com o mesmo formato do Discord, então
+        Comandos da casa em qualquer canal: <b>/dado</b>, <b>/moeda</b>, <b>/sortear</b>, <b>/escolher</b> e <b>/ajuda</b>. Um <b>webhook</b> é um link secreto que deixa um bot ou serviço de fora mandar mensagens num canal. Funciona com o mesmo formato do Discord, então
         dá para usar com GitHub, alertas de servidor, bots de RSS, IFTTT, n8n e afins: é só colar o link onde pediria um webhook do Discord.
       </p>
       <label className="mb-4 block text-[13px] text-oat/60">
@@ -249,13 +300,18 @@ export function BotsTab({ server }: { server: Server }) {
       )}
       <div className="mt-5 space-y-2">
         {hooks.map((h) => (
-          <div key={h.id} className="flex items-center gap-3 rounded-[12px] bg-cocoa-3 px-3 py-2.5">
-            <Bot className="size-5 text-ember" />
-            <span className="min-w-0 flex-1 truncate font-medium">{h.name}</span>
-            <span className="text-[12px] text-oat/40">desde {new Date(h.created_at).toLocaleDateString("pt-BR")}</span>
-            <button type="button" onClick={() => void remove(h)} aria-label={`Apagar webhook ${h.name}`} className="rounded-md p-1 text-rust hover:bg-rust/15">
-              <Trash2 className="size-4" />
-            </button>
+          <div key={h.id} className="rounded-[12px] bg-cocoa-3 px-3 py-2.5">
+            <div className="flex items-center gap-3">
+              <Bot className="size-5 text-ember" />
+              <span className="min-w-0 flex-1 truncate font-medium">{h.name}</span>
+              <span className="text-[12px] text-oat/40">desde {new Date(h.created_at).toLocaleDateString("pt-BR")}</span>
+              <button type="button" onClick={() => void remove(h)} aria-label={`Apagar webhook ${h.name}`} className="rounded-md p-1 text-rust hover:bg-rust/15">
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+            <div className="pl-8">
+              <HookCommands hook={h} onSaved={(n) => setHooks((l) => l.map((x) => (x.id === n.id ? n : x)))} />
+            </div>
           </div>
         ))}
         {hooks.length === 0 && <p className="text-[13px] text-oat/45">Nenhum webhook neste canal ainda.</p>}

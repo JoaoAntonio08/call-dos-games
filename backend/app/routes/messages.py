@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -224,7 +225,17 @@ async def create_message(channel_id: str, body: MessageIn, me: Auth = CurrentUse
         reply = parse_id(body.reply_to)
         if not await pool().fetchval("SELECT 1 FROM messages WHERE id = $1 AND channel_id = $2", reply, cid):
             reply = None
-    return await post_message(cid, me.id, content, attachments=attachments, reply_to=reply)
+    msg = await post_message(cid, me.id, content, attachments=attachments, reply_to=reply)
+    if content.startswith("/") and ch["type"] in ("text", "dm"):
+        from .comandos import run_command  # aqui para não dar ciclo
+
+        task = asyncio.create_task(run_command(ch, me.id, content, msg["id"]))
+        _command_tasks.add(task)
+        task.add_done_callback(_command_tasks.discard)
+    return msg
+
+
+_command_tasks: set[asyncio.Task] = set()
 
 
 class EditIn(BaseModel):

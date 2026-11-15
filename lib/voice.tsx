@@ -25,7 +25,7 @@ export interface VoicePrefs {
   joinVolume: number;
   joinSounds: boolean;
   startMuted: boolean;
-  /** guarda os últimos ~40 s da tela compartilhada para clipar */
+  /** guarda os últimos ~40 s da call (tela ou só áudio) para clipar */
   clipBuffer: boolean;
 }
 
@@ -146,7 +146,17 @@ interface VoiceCtx {
   queue: QueueItem[];
   playQueued: (item: QueueItem) => Promise<void>;
   /** clipar momento */
-  clip: { available: boolean; supported: boolean; busy: boolean; save: () => Promise<void> };
+  clip: {
+    available: boolean;
+    supported: boolean;
+    busy: boolean;
+    save: () => Promise<void>;
+    /** "audio" quando não tem tela nenhuma: o clipe sai só com as vozes */
+    kind: "video" | "audio";
+    /** sua tela gravando só para clipes (sem transmitir) */
+    ownScreen: boolean;
+    toggleOwnScreen: () => Promise<void>;
+  };
 }
 
 const Ctx = createContext<VoiceCtx | null>(null);
@@ -531,10 +541,47 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------------- clipar momento ---------------- */
   const sharer = call.peers.find((p) => !p.isLocal && p.screen) ?? call.peers.find((p) => p.screen);
+  // sem live: dá para gravar a própria tela só para clipes (fica no seu PC, ninguém recebe)
+  const [ownRaw, setOwnScreen] = useState<MediaStream | null>(null);
+  // só vale dentro da call: saiu, para de gravar
+  const ownScreen = channelId ? ownRaw : null;
+  useEffect(() => {
+    if (!ownRaw) return;
+    const tracks = ownRaw.getTracks();
+    const end = () => setOwnScreen((s) => (s === ownRaw ? null : s));
+    tracks[0]?.addEventListener("ended", end);
+    return () => {
+      tracks[0]?.removeEventListener("ended", end);
+      for (const t of tracks) t.stop();
+    };
+  }, [ownRaw]);
+  useEffect(() => {
+    if (!channelId) for (const t of ownRaw?.getTracks() ?? []) t.stop();
+  }, [channelId, ownRaw]);
+  const toggleOwnScreen = useCallback(async () => {
+    if (ownScreen) {
+      setOwnScreen(null);
+      return;
+    }
+    try {
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, height: { ideal: 1080 } }, audio: true });
+      setOwnScreen(s);
+      toast("Gravando sua tela só para clipes. Ninguém está vendo. Alt+C salva o lance.");
+    } catch {
+      /* desistiu de escolher */
+    }
+  }, [ownScreen]);
+  const ownVideo = ownScreen?.getVideoTracks()[0];
+  const useOwn = !sharer?.screen && !!ownVideo;
   const clipAudio: Track[] = channelId ? [sharer?.screenAudio, ...call.peers.map((p) => p.mic)].filter((t): t is Track => !!t) : [];
-  const clipper = useClipper({ enabled: !!channelId && prefs.clipBuffer, video: channelId ? sharer?.screen : undefined, audio: clipAudio });
+  const clipper = useClipper({
+    enabled: !!channelId && prefs.clipBuffer,
+    video: channelId ? (sharer?.screen?.mediaStreamTrack ?? (useOwn ? ownVideo : undefined)) : undefined,
+    audio: clipAudio,
+    extraAudio: useOwn ? ownScreen!.getAudioTracks() : [],
+  });
   const clipperClip = clipper.clip;
-  const sharerName = sharer ? (sharer.isLocal ? me?.display_name : sharer.name) : undefined;
+  const sharerName = sharer ? (sharer.isLocal ? me?.display_name : sharer.name) : useOwn ? me?.display_name : undefined;
   const saveClip = useCallback(async () => {
     if (!channelId) return;
     const res = await clipperClip();
@@ -557,19 +604,45 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     try {
       const up = await upload<Attachment>("/files?clip=1", file);
       await api(`/channels/${target.id}/messages`, {
-        json: { content: `🎬 Clipe${sharerName ? ` da tela de ${sharerName}` : ""}${voiceName ? ` na ${voiceName}` : ""}`, attachment_ids: [up.id] },
+        json: {
+          content:
+            res.kind === "audio"
+              ? `🎙️ Clipe de áudio${voiceName ? ` da ${voiceName}` : " da call"}`
+              : `🎬 Clipe${sharerName ? ` da tela de ${sharerName}` : ""}${voiceName ? ` na ${voiceName}` : ""}`,
+          attachment_ids: [up.id],
+        },
       });
       toast(server ? `Clipe salvo no #${target.name}.` : "Clipe salvo na conversa.");
+      // no app de Windows o atalho funciona com o jogo na frente: o sininho avisa que salvou
+      if (document.hidden || !document.hasFocus()) chime("ping", prefs.sfxVolume * 0.6);
       publish("react", { emoji: "🎬" });
       pushReaction("🎬", me?.display_name ?? "Você");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Não deu para salvar o clipe.");
     }
-  }, [channelId, clipperClip, sharerName, publish, pushReaction, me?.display_name]);
+  }, [channelId, clipperClip, sharerName, publish, pushReaction, me?.display_name, prefs.sfxVolume]);
   const clip = useMemo(
-    () => ({ available: clipper.ready, supported: clipper.supported, busy: clipper.busy, save: saveClip }),
-    [clipper.ready, clipper.supported, clipper.busy, saveClip],
+    () => ({
+      available: clipper.ready,
+      supported: clipper.supported,
+      busy: clipper.busy,
+      save: saveClip,
+      kind: clipper.kind,
+      ownScreen: !!ownScreen,
+      toggleOwnScreen,
+    }),
+    [clipper.ready, clipper.supported, clipper.busy, clipper.kind, saveClip, ownScreen, toggleOwnScreen],
   );
+
+  // app de Windows: atalho global (Alt+Shift+C) clipa mesmo com o jogo na frente
+  const clipNow = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    clipNow.current = clipper.ready && !clipper.busy ? () => void saveClip() : null;
+  }, [clipper.ready, clipper.busy, saveClip]);
+  useEffect(() => {
+    const desk = (window as unknown as { cdgDesktop?: { onClip?: (cb: () => void) => () => void } }).cdgDesktop;
+    return desk?.onClip?.(() => clipNow.current?.());
+  }, []);
 
   // sair da call ao fazer logout
   useEffect(() => {

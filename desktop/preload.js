@@ -13,4 +13,18 @@ contextBridge.exposeInMainWorld("cdgDesktop", {
     ipcRenderer.on("cdg:update-progress", f);
     return () => ipcRenderer.removeListener("cdg:update-progress", f);
   },
+  // jogo aberto no PC (só o nome do jogo reconhecido)
+  onGame: (cb) => {
+    const f = (_e, name) => cb(name);
+    ipcRenderer.on("cdg:game", f);
+    ipcRenderer.invoke("cdg:game-now").then(cb, () => {});
+    return () => ipcRenderer.removeListener("cdg:game", f);
+  },
+  gameCandidates: () => ipcRenderer.invoke("cdg:game-candidates"),
+  customGames: (list) => ipcRenderer.invoke("cdg:game-custom", list),
+  onClip: (cb) => {
+    const f = () => cb();
+    ipcRenderer.on("cdg:clip", f);
+    return () => ipcRenderer.removeListener("cdg:clip", f);
+  },
 });

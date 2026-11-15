@@ -28,6 +28,7 @@ from .routes.session import router as session_router
 from .routes.users import router as users_router
 from .routes.voz import router as voz_router
 from .routes.extras2 import router as extras2_router, steam_loop
+from .routes.comandos import router as comandos_router
 
 
 @asynccontextmanager
@@ -88,5 +89,5 @@ async def health() -> dict:
     return {"ok": True}
 
 
-for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router):
+for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router):
     app.include_router(r)

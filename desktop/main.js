@@ -1,7 +1,7 @@
 // App de Windows do Call dos Games: uma janela própria que abre o site publicado.
 // Como o conteúdo vem do site, o app se atualiza sozinho sempre que o site é republicado.
-const { app, BrowserWindow, Menu, desktopCapturer, ipcMain, net, session, shell, clipboard } = require("electron");
-const { spawn } = require("node:child_process");
+const { app, BrowserWindow, Menu, desktopCapturer, globalShortcut, ipcMain, net, session, shell, clipboard } = require("electron");
+const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -217,6 +217,100 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // Alt+Shift+C clipa o lance mesmo com o jogo na frente (o site decide se dá para clipar agora)
+  try {
+    globalShortcut.register("Alt+Shift+C", () => win?.webContents.send("cdg:clip"));
+  } catch {
+    /* outro programa já usa o atalho */
+  }
+});
+
+app.on("will-quit", () => globalShortcut.unregisterAll());
+
+/* ------------------------------------------------------------------ jogo aberto no PC */
+// A cada 15 s olha a lista de programas abertos (só o nome) e avisa o site quando o jogo muda.
+// Nada sai do PC além do nome do jogo reconhecido, e o site só manda se a pessoa deixar ligado.
+const KNOWN = require("./jogos.js");
+const customFile = () => path.join(app.getPath("userData"), "jogos-meus.json");
+let custom = {};
+try {
+  custom = JSON.parse(fs.readFileSync(customFile(), "utf8")) || {};
+} catch {
+  custom = {};
+}
+let currentGame = null;
+
+function tasklist(verbose) {
+  return new Promise((resolve) => {
+    execFile("tasklist", verbose ? ["/v", "/fo", "csv", "/nh"] : ["/fo", "csv", "/nh"], { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+      if (err) return resolve([]);
+      resolve(
+        out
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((line) => (line.match(/"([^"]*)"/g) || []).map((c) => c.slice(1, -1))),
+      );
+    });
+  });
+}
+
+async function scanGame() {
+  const rows = await tasklist(false);
+  // os jogos que a pessoa adicionou têm preferência sobre a lista pronta
+  const open = rows.map((r) => (r[0] || "").toLowerCase());
+  const mine = open.find((exe) => custom[exe]);
+  const known = open.find((exe) => KNOWN[exe]);
+  const found = mine ? custom[mine] : known ? KNOWN[known] : null;
+  if (found !== currentGame) {
+    currentGame = found;
+    if (win && !win.isDestroyed()) win.webContents.send("cdg:game", found);
+  }
+}
+
+app.whenReady().then(() => {
+  setTimeout(scanGame, 4000);
+  setInterval(scanGame, 15000);
+});
+
+const fromApp = (e) => isApp(e.senderFrame?.url || "");
+
+ipcMain.handle("cdg:game-now", (e) => (fromApp(e) ? currentGame : null));
+
+// janelas abertas agora, para a pessoa escolher um jogo que a lista não conhece
+ipcMain.handle("cdg:game-candidates", async (e) => {
+  if (!fromApp(e)) return [];
+  const rows = await tasklist(true);
+  const skip = new Set(["explorer.exe", "call dos games.exe", "taskmgr.exe", "applicationframehost.exe", "textinputhost.exe", "systemsettings.exe", "searchhost.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe"]);
+  const seen = new Map();
+  for (const r of rows) {
+    const exe = (r[0] || "").toLowerCase();
+    const title = r[8] || "";
+    if (!exe.endsWith(".exe") || skip.has(exe) || !title || title === "N/A" || title === "N/D" || seen.has(exe)) continue;
+    seen.set(exe, { exe, title: title.slice(0, 120) });
+  }
+  return [...seen.values()].sort((a, b) => a.title.localeCompare(b.title));
+});
+
+ipcMain.handle("cdg:game-custom", (e, list) => {
+  if (!fromApp(e)) throw new Error("origem");
+  if (list !== undefined) {
+    if (!Array.isArray(list)) throw new Error("lista");
+    const next = {};
+    for (const it of list.slice(0, 60)) {
+      const exe = String(it?.exe || "").toLowerCase().trim();
+      const name = String(it?.name || "").trim().slice(0, 80);
+      if (/^[^\\/:*?"<>|]{1,80}\.exe$/.test(exe) && name) next[exe] = name;
+    }
+    custom = next;
+    try {
+      fs.writeFileSync(customFile(), JSON.stringify(custom));
+    } catch {
+      /* sem problema */
+    }
+    void scanGame();
+  }
+  return Object.entries(custom).map(([exe, name]) => ({ exe, name }));
 });
 
 /* ------------------------------------------------------------------ atualização */

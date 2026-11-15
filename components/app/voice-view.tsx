@@ -358,6 +358,17 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
                 initial={share}
                 viewers={n - 1}
                 freeTier={livekitCloud}
+                clipOnly={
+                  v.prefs.clipBuffer && v.clip.supported
+                    ? {
+                        on: v.clip.ownScreen,
+                        toggle: () => {
+                          setDock(null);
+                          void v.clip.toggleOwnScreen();
+                        },
+                      }
+                    : undefined
+                }
                 onClose={() => setDock(null)}
                 onStart={(s) => {
                   setShare(s);
@@ -409,8 +420,20 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
           </DockButton>
         )}
         {v.clip.available && (
-          <DockButton label={v.clip.busy ? "Salvando clipe…" : "Clipar os últimos segundos (Alt+C)"} active={v.clip.busy} onClick={() => !v.clip.busy && void v.clip.save()}>
+          <DockButton
+            label={
+              v.clip.busy
+                ? "Salvando clipe…"
+                : v.clip.kind === "audio"
+                  ? `Clipar o áudio dos últimos segundos (Alt+C)`
+                  : `Clipar os últimos segundos${v.clip.ownScreen ? " da sua tela" : ""} (Alt+C)`
+            }
+            active={v.clip.busy}
+            onClick={() => !v.clip.busy && void v.clip.save()}
+            className="relative"
+          >
             <Scissors />
+            {v.clip.ownScreen && <span aria-hidden className="absolute right-1.5 top-1.5 size-2 rounded-full bg-rust" />}
           </DockButton>
         )}
         <DockButton label="Atividades" open={dock === "fun"} onClick={() => toggle("fun")}>

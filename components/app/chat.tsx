@@ -709,6 +709,29 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
     }
   }
 
+  // autocompletar /comando (os da casa e os dos bots do servidor)
+  const [cmdCache, setCmdCache] = useState<{ cid: string; list: { name: string; description: string; bot: string }[] } | null>(null);
+  const commands = cmdCache?.cid === channelId ? cmdCache.list : null;
+  const slash = /^\/([a-z0-9_-]*)$/i.exec(text)?.[1]?.toLowerCase();
+  const wantCommands = slash !== undefined && commands === null;
+  useEffect(() => {
+    if (!wantCommands) return;
+    let alive = true;
+    api<{ name: string; description: string; bot: string }[]>(`/channels/${channelId}/commands`)
+      .then((list) => alive && setCmdCache({ cid: channelId, list }))
+      .catch(() => alive && setCmdCache({ cid: channelId, list: [] }));
+    return () => {
+      alive = false;
+    };
+  }, [wantCommands, channelId]);
+  const cmdMatches = slash !== undefined && commands ? commands.filter((c) => c.name.startsWith(slash)).slice(0, 8) : [];
+  const [cmdSel, setCmdSel] = useState(0);
+  function completeCommand(name: string) {
+    setText(`/${name} `);
+    setCmdSel(0);
+    area.current?.querySelector("textarea")?.focus();
+  }
+
   // autocompletar @menção
   const members = useMemo(() => server?.members.map((m) => m.user) ?? [], [server]);
   const matches = mention
@@ -750,6 +773,28 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
       }}
     >
       <div ref={area} className="relative rounded-[16px] bg-cocoa-4/70">
+        {cmdMatches.length > 0 && (
+          <div className="absolute inset-x-0 bottom-full mb-2 rounded-[14px] bg-cocoa-0 p-1.5" role="listbox" aria-label="Comandos">
+            <p className="label px-2 pb-1.5 pt-1 text-oat/40">Comandos</p>
+            {cmdMatches.map((c, i) => (
+              <button
+                key={c.name}
+                type="button"
+                role="option"
+                aria-selected={i === cmdSel % cmdMatches.length}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  completeCommand(c.name);
+                }}
+                className={`flex w-full items-baseline gap-2.5 rounded-[9px] px-2 py-1.5 text-left text-[14px] ${i === cmdSel % cmdMatches.length ? "bg-cocoa-4" : ""}`}
+              >
+                <span className="font-semibold">/{c.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-oat/50">{c.description}</span>
+                <span className="shrink-0 text-[11px] text-oat/35">{c.bot}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {mention && matches.length > 0 && (
           <div className="absolute inset-x-0 bottom-full mb-2 rounded-[14px] bg-cocoa-0 p-1.5">
             <p className="label px-2 pb-1.5 pt-1 text-oat/40">Membros</p>
@@ -808,6 +853,13 @@ function Composer({ channelId, server, placeholder }: { channelId: string; serve
               }
             }}
             onKeyDown={(e) => {
+              if (cmdMatches.length) {
+                const n = cmdMatches.length;
+                if (e.key === "ArrowDown") return (e.preventDefault(), setCmdSel((s) => (s + 1) % n));
+                if (e.key === "ArrowUp") return (e.preventDefault(), setCmdSel((s) => (s - 1 + n) % n));
+                const exact = cmdMatches.some((c) => c.name === slash);
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !exact)) return (e.preventDefault(), completeCommand(cmdMatches[cmdSel % n].name));
+              }
               if (mention && matches.length) {
                 if (e.key === "ArrowDown") return (e.preventDefault(), setSel((s) => (s + 1) % matches.length));
                 if (e.key === "ArrowUp") return (e.preventDefault(), setSel((s) => (s - 1 + matches.length) % matches.length));

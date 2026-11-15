@@ -23,8 +23,21 @@ class Hub:
         # canal de voz -> {usuário -> estado}
         self.voice: dict[int, dict[int, dict[str, Any]]] = {}
         self.user_voice: dict[int, int] = {}
-        # o que cada um está jogando agora (Steam)
+        # o que cada um está jogando agora: a Steam tem preferência, depois o jogo que o app de Windows achou
         self.games: dict[int, dict[str, Any]] = {}
+        self.steam_games: dict[int, dict[str, Any]] = {}
+        self.app_games: dict[int, dict[str, Any]] = {}
+
+    async def update_game(self, user_id: int) -> None:
+        """Recalcula o "jogando agora" da pessoa e avisa quem conhece ela, se mudou."""
+        g = self.steam_games.get(user_id) or self.app_games.get(user_id)
+        if g == self.games.get(user_id):
+            return
+        if g:
+            self.games[user_id] = g
+        else:
+            self.games.pop(user_id, None)
+        await self.to_audience(user_id, "game", {"user_id": sid(user_id), "game": g})
 
     # ---------------- presença
     def online(self, user_id: int) -> bool:
@@ -211,6 +224,9 @@ async def gateway(ws: WebSocket) -> None:
             hub.sockets.pop(user_id, None)
             await hub.set_voice(user_id, None, {})
             await hub.broadcast_presence(user_id)
+            # o jogo do app de Windows só vale enquanto o app está conectado
+            if hub.app_games.pop(user_id, None):
+                await hub.update_game(user_id)
 
 
 async def handle(user_id: int, ws: WebSocket, msg: dict) -> None:
