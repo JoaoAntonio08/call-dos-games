@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import secrets
 import time
 from collections import deque
 from typing import Any
+from urllib.parse import parse_qsl
 
 import httpx
 from fastapi import APIRouter, Header, Request, UploadFile
@@ -383,6 +385,47 @@ async def delete_webhook(webhook_id: str, me: Auth = CurrentUser) -> dict:
 
 
 _hook_hits: dict[int, deque[float]] = {}
+WEBHOOK_BODY_LIMIT = 64 * 1024
+
+
+async def read_webhook_body(request: Request) -> dict:
+    """Lê JSON/form simples sem permitir que um webhook esgote a memória da API."""
+    raw_length = request.headers.get("content-length", "")
+    if raw_length:
+        try:
+            if int(raw_length) > WEBHOOK_BODY_LIMIT:
+                raise err(413, "Webhook grande demais (máximo 64 KiB).")
+        except ValueError:
+            raise err(400, "Content-Length inválido.")
+
+    payload = bytearray()
+    async for chunk in request.stream():
+        payload += chunk
+        if len(payload) > WEBHOOK_BODY_LIMIT:
+            raise err(413, "Webhook grande demais (máximo 64 KiB).")
+    if not payload:
+        raise err(400, "Mande um JSON com o campo content.")
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type == "application/x-www-form-urlencoded":
+        try:
+            return dict(parse_qsl(payload.decode("utf-8", errors="strict"), keep_blank_values=True))
+        except UnicodeDecodeError:
+            raise err(400, "Formulário inválido.")
+    if content_type not in ("", "application/json", "text/json"):
+        raise err(415, "Use JSON ou formulário URL-encoded.")
+    try:
+        body = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        if not content_type:
+            try:
+                return dict(parse_qsl(payload.decode("utf-8", errors="strict"), keep_blank_values=True))
+            except UnicodeDecodeError:
+                pass
+        raise err(400, "JSON inválido.")
+    if not isinstance(body, dict):
+        raise err(400, "Mande um JSON com o campo content.")
+    return body
 
 
 @router.post("/webhooks/{webhook_id}")
@@ -408,13 +451,7 @@ async def run_webhook(
     if len(q) >= 30:
         raise err(429, "Calma: no máximo 30 mensagens por minuto por webhook.")
     q.append(now)
-    try:
-        body = await request.json()
-    except Exception:
-        form = await request.form()
-        body = dict(form)
-    if not isinstance(body, dict):
-        raise err(400, "Mande um JSON com o campo content.")
+    body = await read_webhook_body(request)
     content = str(body.get("content") or "").strip()
     # embeds simples do Discord viram texto
     for e in (body.get("embeds") or [])[:5] if isinstance(body.get("embeds"), list) else []:
