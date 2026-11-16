@@ -62,3 +62,26 @@ async def test_upload_preserves_minimum_free_disk(monkeypatch):
     with pytest.raises(HTTPException) as raised:
         await files.enforce_upload_budget(42, 101)
     assert raised.value.status_code == 507
+
+
+@pytest.mark.asyncio
+async def test_rejected_budget_does_not_read_or_decode_upload(monkeypatch):
+    read = False
+
+    class Upload:
+        filename = "large.webm"
+
+        async def read(self, size):
+            nonlocal read
+            read = True
+            return b""
+
+    async def reject(owner_id, incoming):
+        assert incoming == 0
+        raise files.err(429, "limit")
+
+    monkeypatch.setattr(files, "enforce_upload_budget", reject)
+    with pytest.raises(HTTPException) as raised:
+        await files.save_upload(Upload(), "attachment", 42)
+    assert raised.value.status_code == 429
+    assert not read
