@@ -15,6 +15,9 @@ test("generated guest keys carry 128 bits and do not collide in a sample", () =>
 test("short or malformed room keys are rejected", () => {
   assert.equal(roomNameFromKey("abc"), "");
   assert.equal(roomNameFromKey("short-human-key"), "");
+  assert.equal(roomNameFromKey("this-is-long-but-predictable"), "");
+  assert.equal(roomNameFromKey("a".repeat(31)), "");
+  assert.equal(roomNameFromKey("g".repeat(32)), "");
   assert.equal(roomNameFromKey("-".repeat(64)), "");
 });
 

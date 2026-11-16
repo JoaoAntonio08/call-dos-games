@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   if (!name) return Response.json({ error: "Digite um nome." }, { status: 400, headers: { "Cache-Control": "no-store" } });
 
   // identidade única, assim duas pessoas com o mesmo nome não se derrubam
-  const identity = `${name}#${crypto.randomUUID().slice(0, 6)}`;
+  const identity = `${name}#${crypto.randomUUID()}`;
 
   const token = new AccessToken(apiKey, apiSecret, {
     identity,

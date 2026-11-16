@@ -45,6 +45,17 @@ async def livekit(method: str, room: str, body: dict[str, Any]) -> dict | None:
         return None
 
 
+async def livekit_identities(channel_id: int) -> set[int]:
+    """Identidades numéricas conectadas, inclusive sem estado no gateway da aplicação."""
+    response = await livekit("ListParticipants", room_name(channel_id), {})
+    identities: set[int] = set()
+    for participant in (response or {}).get("participants", []):
+        raw = str(participant.get("identity", ""))
+        if raw.isdigit() and int(raw) > 0:
+            identities.add(int(raw))
+    return identities
+
+
 def publish_sources(mute: bool, noshare: bool = False) -> list[str] | None:
     """Fontes que a pessoa pode transmitir. None = todas; lista vazia = nenhuma."""
     if not mute and not noshare:
@@ -101,13 +112,49 @@ async def revoke_server_voice(server_id: int, user_id: int) -> None:
 
 
 async def refresh_channel_voice(channel_id: int) -> None:
-    """Aplica imediatamente mudanças de cargos/permissões a quem está na call."""
-    for user_id in list(hub.voice.get(channel_id, {})):
+    """Revalida gateway e LiveKit; não depende do cliente ter anunciado estado."""
+    participants = set(hub.voice.get(channel_id, {})) | await livekit_identities(channel_id)
+    for user_id in participants:
         ch = await can_access_channel(user_id, channel_id)
         if not ch:
             await revoke_voice_participant(channel_id, user_id, "Você perdeu acesso a esta call.")
             continue
-        await apply_permissions(channel_id, user_id, await mods_of(ch["server_id"], user_id))
+        mods = await mods_of(ch["server_id"], user_id)
+        await apply_permissions(channel_id, user_id, mods)
+        if user_id in hub.voice.get(channel_id, {}):
+            await hub.refresh_mods(channel_id, user_id, mods)
+
+
+async def refresh_server_voice(server_id: int) -> None:
+    rows = await pool().fetch("SELECT id FROM channels WHERE server_id = $1 AND type = 'voice'", server_id)
+    for row in rows:
+        await refresh_channel_voice(row["id"])
+
+
+async def refresh_user_voice(user_id: int, server_id: int | None = None) -> None:
+    """Reaplica moderação em todas as salas onde o usuário realmente está conectado."""
+    if server_id is not None:
+        rows = await pool().fetch("SELECT id, server_id FROM channels WHERE server_id = $1 AND type = 'voice'", server_id)
+    else:
+        rows = await pool().fetch(
+            """SELECT c.id, c.server_id FROM channels c
+               WHERE (c.type = 'voice' AND EXISTS (
+                          SELECT 1 FROM members m WHERE m.server_id = c.server_id AND m.user_id = $1
+                      ))
+                  OR (c.type = 'dm' AND EXISTS (
+                          SELECT 1 FROM dm_participants d WHERE d.channel_id = c.id AND d.user_id = $1
+                      ))""",
+            user_id,
+        )
+    current = hub.user_voice.get(user_id)
+    for row in rows:
+        channel_id = int(row["id"])
+        if current != channel_id and user_id not in await livekit_identities(channel_id):
+            continue
+        mods = await mods_of(row["server_id"], user_id)
+        await apply_permissions(channel_id, user_id, mods)
+        if current == channel_id:
+            await hub.refresh_mods(channel_id, user_id, mods)
 
 
 # ------------------------------------------------------------------ quem pode mexer em quem
@@ -123,6 +170,10 @@ async def _server_voice_target(server_id: int, user_id: int, me: int) -> int | N
         raise err(404, "Essa pessoa não está no servidor.")
     cid = hub.user_voice.get(user_id)
     if cid is None:
+        rows = await pool().fetch("SELECT id FROM channels WHERE server_id = $1 AND type = 'voice'", server_id)
+        for row in rows:
+            if user_id in await livekit_identities(row["id"]):
+                return int(row["id"])
         return None
     srv = await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", cid)
     return cid if srv == server_id else None
@@ -151,9 +202,7 @@ async def set_voice_mods(server_id: str, user_id: str, body: ModsIn, me: Auth = 
            ON CONFLICT (server_id, user_id) DO UPDATE SET mute = EXCLUDED.mute, deaf = EXCLUDED.deaf, gain = EXCLUDED.gain""",
         s, target, mods["mute"], mods["deaf"], mods["gain"],
     )
-    if cid is not None:
-        await apply_permissions(cid, target, mods)
-        await hub.refresh_mods(cid, target, mods)
+    await refresh_user_voice(target, s)
     return {"user_id": sid(target), **mods}
 
 
@@ -189,6 +238,10 @@ async def move_member(server_id: str, user_id: str, body: MoveIn, me: Auth = Cur
     me_row = await fetch_user(me.id)
     # o app da pessoa troca de sala sozinho ao receber isto
     await hub.send([target], "voice_move", {"channel_id": sid(to), "channel_name": ch["name"], "by": me_row["display_name"] if me_row else "Um admin"})
+    # Um cliente modificado não pode ignorar a ordem e continuar na sala anterior.
+    await livekit("RemoveParticipant", room_name(cid), {"identity": str(target)})
+    if hub.user_voice.get(target) == cid:
+        await hub.set_voice(target, None, {})
     return {"ok": True}
 
 

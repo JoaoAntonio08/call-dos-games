@@ -15,7 +15,9 @@ export function normalizeKey(raw: string): string {
 /** Nome da sala no LiveKit a partir da chave. Vazio quando a chave não serve. */
 export function roomNameFromKey(raw: string): string {
   const key = normalizeKey(raw);
-  return /^[a-z0-9][a-z0-9-]{19,63}$/.test(key) ? `guest-${key}` : "";
+  // A sala rápida funciona como um bearer secret: só aceite o formato aleatório
+  // gerado abaixo (UUID sem hífens, 128 bits), não frases previsíveis compridas.
+  return /^[a-f0-9]{32}$/.test(key) ? `guest-${key}` : "";
 }
 
 /** Chave aleatória de 128 bits. Compartilhe o link em vez de ditar a chave. */

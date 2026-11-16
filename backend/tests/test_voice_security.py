@@ -64,6 +64,25 @@ async def test_permission_refresh_revokes_participant_without_access(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_channel_refresh_finds_participant_missing_from_gateway(monkeypatch):
+    revoked: list[tuple[int, int]] = []
+
+    class Hub:
+        voice = {}
+
+    monkeypatch.setattr(voz, "hub", Hub())
+    monkeypatch.setattr(voz, "livekit_identities", lambda channel_id: async_value({42}))
+    monkeypatch.setattr(voz, "can_access_channel", lambda user_id, channel_id: async_value(None))
+
+    async def revoke(channel_id, user_id, reason):
+        revoked.append((channel_id, user_id))
+
+    monkeypatch.setattr(voz, "revoke_voice_participant", revoke)
+    await voz.refresh_channel_voice(9)
+    assert revoked == [(9, 42)]
+
+
+@pytest.mark.asyncio
 async def test_server_removal_revokes_every_livekit_room(monkeypatch):
     calls: list[tuple[str, str]] = []
 

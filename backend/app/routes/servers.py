@@ -336,11 +336,9 @@ async def update_member(server_id: str, user_id: str, body: MemberPatch, me: Aut
                 await con.execute("UPDATE servers SET owner_id = $1 WHERE id = $2", target, s)
         else:
             await pool().execute("UPDATE members SET role = $1 WHERE server_id = $2 AND user_id = $3", body.role, s, target)
-        current = hub.user_voice.get(target)
-        if current is not None:
-            from .voz import refresh_channel_voice
+        from .voz import refresh_user_voice
 
-            await refresh_channel_voice(current)
+        await refresh_user_voice(target, s)
     await announce_server(s)
     return {"ok": True}
 
@@ -449,11 +447,9 @@ async def set_member_roles(server_id: str, user_id: str, body: MemberRolesIn, me
         for rid in ids:
             await con.execute("INSERT INTO member_roles (server_id, user_id, role_id) VALUES ($1,$2,$3)", s, target, rid)
     await announce_server(s)
-    current = hub.user_voice.get(target)
-    if current is not None:
-        from .voz import refresh_channel_voice
+    from .voz import refresh_user_voice
 
-        await refresh_channel_voice(current)
+    await refresh_user_voice(target, s)
     return {"ok": True}
 
 
@@ -536,10 +532,12 @@ async def delete_channel(channel_id: str, me: Auth = CurrentUser) -> dict:
         raise err(404, "Canal não encontrado.")
     await require_admin(ch["server_id"], me.id)
     if ch["type"] == "voice":
-        from .voz import revoke_voice_participant
+        from .voz import livekit, revoke_voice_participant, room_name
 
         for user_id in list(hub.voice.get(cid, {})):
             await revoke_voice_participant(cid, user_id, "Esta call foi removida.")
+        # DeleteRoom também remove participantes que nunca anunciaram estado no gateway.
+        await livekit("DeleteRoom", room_name(cid), {})
     await pool().execute("DELETE FROM channels WHERE id = $1", cid)
     await announce_server(ch["server_id"])
     return {"ok": True}

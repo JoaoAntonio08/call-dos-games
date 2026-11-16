@@ -70,18 +70,10 @@ async def active_block(server_id: int | None, user_id: int) -> dict | None:
 
 
 async def reapply(user_id: int, server_id: int | None) -> None:
-    """Aplica de novo as permissões de quem está numa call (deste servidor, ou qualquer uma se None)."""
-    from .voz import apply_permissions, mods_of
+    """Aplica de novo as permissões inclusive em conexões não anunciadas no gateway."""
+    from .voz import refresh_user_voice
 
-    cid = hub.user_voice.get(user_id)
-    if cid is None:
-        return
-    srv = await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", cid)
-    if server_id is not None and srv != server_id:
-        return
-    mods = await mods_of(srv, user_id)
-    await apply_permissions(cid, user_id, mods)
-    await hub.refresh_mods(cid, user_id, mods)
+    await refresh_user_voice(user_id, server_id)
 
 
 async def set_block(scope: int, user_id: int, until: datetime | None, reason: str, by: int | None) -> None:
