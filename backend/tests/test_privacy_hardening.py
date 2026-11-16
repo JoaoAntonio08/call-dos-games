@@ -4,7 +4,7 @@ import pytest
 from fastapi import Response
 
 from app.core import settings
-from app.realtime import Hub, websocket_origin_allowed
+from app.realtime import Hub, websocket_origin_allowed, websocket_session_valid
 from app.routes.uso import is_platform_admin
 
 
@@ -23,6 +23,16 @@ def test_browser_websocket_origin_must_be_allowlisted(monkeypatch):
     assert websocket_origin_allowed(None)  # app nativo
     assert not websocket_origin_allowed("https://evil.example")
     assert not websocket_origin_allowed("null")
+
+
+@pytest.mark.asyncio
+async def test_websocket_rechecks_revoked_session(monkeypatch):
+    from app import realtime
+
+    monkeypatch.setattr(realtime, "user_from_token", lambda token: async_value((42, 9) if token == "active" else None))
+    assert await websocket_session_valid("active", 42)
+    assert not await websocket_session_valid("revoked", 42)
+    assert not await websocket_session_valid("active", 43)
 
 
 @pytest.mark.asyncio

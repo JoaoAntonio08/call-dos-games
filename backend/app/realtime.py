@@ -181,6 +181,12 @@ def websocket_origin_allowed(origin: str | None) -> bool:
     return not origin or origin.rstrip("/") in settings.ws_origins
 
 
+async def websocket_session_valid(token: str, user_id: int) -> bool:
+    """A revogação de uma sessão também encerra o gateway já conectado."""
+    found = await user_from_token(token)
+    return bool(found and found[0] == user_id)
+
+
 async def can_access_channel(user_id: int, channel_id: int) -> dict | None:
     row = await pool().fetchrow(
         """
@@ -213,7 +219,8 @@ async def gateway(ws: WebSocket) -> None:
     # 1ª mensagem precisa ser {"op": "auth", "token": "..."} (o token não vai na URL para não cair em log)
     try:
         first = json.loads(await asyncio.wait_for(ws.receive_text(), timeout=10))
-        found = await user_from_token(str(first.get("token", ""))) if first.get("op") == "auth" else None
+        auth_token = str(first.get("token", "")) if first.get("op") == "auth" else ""
+        found = await user_from_token(auth_token) if auth_token else None
     except Exception:
         found = None
     if not found:
@@ -246,6 +253,9 @@ async def gateway(ws: WebSocket) -> None:
     try:
         while True:
             raw_text = await ws.receive_text()
+            if not await websocket_session_valid(auth_token, user_id):
+                await ws.close(code=4001, reason="auth")
+                break
             try:
                 await handle(user_id, ws, json.loads(raw_text))
             except WebSocketDisconnect:

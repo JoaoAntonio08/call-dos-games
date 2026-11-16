@@ -154,3 +154,51 @@ def request_stub():
 
 def response_stub():
     return SimpleNamespace(set_cookie=lambda *args, **kwargs: None)
+
+
+class ResetConnection:
+    def __init__(self, user_id: int | None):
+        self.user_id = user_id
+        self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+    def transaction(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_: object):
+        return None
+
+    async def fetchrow(self, query: str, *args: object):
+        self.queries.append((query, args))
+        if self.user_id is None:
+            return None
+        user_id, self.user_id = self.user_id, None
+        return {"user_id": user_id}
+
+    async def execute(self, query: str, *args: object):
+        self.queries.append((query, args))
+
+
+class ResetPool:
+    def __init__(self, connection: ResetConnection):
+        self.connection = connection
+
+    def acquire(self):
+        return self.connection
+
+
+@pytest.mark.asyncio
+async def test_password_reset_token_is_consumed_atomically(monkeypatch):
+    connection = ResetConnection(42)
+    monkeypatch.setattr(auth, "pool", lambda: ResetPool(connection))
+
+    first = await auth.consume_password_reset("token-hash", "password-hash")
+    second = await auth.consume_password_reset("token-hash", "another-hash")
+
+    assert first == 42
+    assert second is None
+    assert "UPDATE password_resets SET used = TRUE" in connection.queries[0][0]
+    assert "RETURNING user_id" in connection.queries[0][0]
+    assert sum("UPDATE users SET password_hash" in query for query, _ in connection.queries) == 1

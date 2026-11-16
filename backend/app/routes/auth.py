@@ -259,23 +259,34 @@ async def forgot(body: ForgotIn) -> dict:
 
 
 class ResetIn(BaseModel):
-    token: str
+    token: str = Field(min_length=20, max_length=512)
     password: str
+
+
+async def consume_password_reset(token_hash: str, password_hash: str) -> int | None:
+    """Consome o token e troca a senha uma única vez, mesmo com pedidos concorrentes."""
+    async with pool().acquire() as con, con.transaction():
+        row = await con.fetchrow(
+            """UPDATE password_resets SET used = TRUE
+               WHERE token_hash = $1 AND NOT used AND expires_at > now()
+               RETURNING user_id""",
+            token_hash,
+        )
+        if not row:
+            return None
+        user_id = int(row["user_id"])
+        await con.execute("UPDATE users SET password_hash = $1 WHERE id = $2", password_hash, user_id)
+        await con.execute("DELETE FROM sessions WHERE user_id = $1", user_id)
+        return user_id
 
 
 @router.post("/reset")
 async def reset(body: ResetIn, request: Request, response: Response) -> dict:
     validate_password(body.password)
-    row = await pool().fetchrow(
-        "SELECT user_id FROM password_resets WHERE token_hash = $1 AND NOT used AND expires_at > now()", sha256(body.token)
-    )
-    if not row:
+    user_id = await consume_password_reset(sha256(body.token), hash_password(body.password))
+    if user_id is None:
         raise err(400, "Esse link expirou ou já foi usado. Peça outro.")
-    async with pool().acquire() as con, con.transaction():
-        await con.execute("UPDATE password_resets SET used = TRUE WHERE token_hash = $1", sha256(body.token))
-        await con.execute("UPDATE users SET password_hash = $1 WHERE id = $2", hash_password(body.password), row["user_id"])
-        await con.execute("DELETE FROM sessions WHERE user_id = $1", row["user_id"])
-    return await session_payload(row["user_id"], request, response)
+    return await session_payload(user_id, request, response)
 
 
 class PasswordIn(BaseModel):
