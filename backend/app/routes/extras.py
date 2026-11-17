@@ -189,7 +189,7 @@ async def add_to_queue(channel_id: str, body: QueueIn, me: Auth = CurrentUser) -
 
 
 async def _queue_item(item_id: int, user_id: int) -> Any:
-    row = await pool().fetchrow("SELECT id, channel_id FROM queue_items WHERE id = $1", item_id)
+    row = await pool().fetchrow("SELECT id, channel_id, video_id, added_by FROM queue_items WHERE id = $1", item_id)
     if not row or not await can_access_channel(user_id, row["channel_id"]):
         raise err(404, "Esse vídeo não está mais na fila.")
     return row
@@ -223,6 +223,10 @@ async def remove_from_queue(item_id: str, played: int = 0, me: Auth = CurrentUse
             who = await perms_member(info["server_id"], me.id)
             if not (who and who.can("dj")):
                 raise err(403, "Só quem pôs (ou um DJ) tira da fila.")
+    if played:
+        # O endpoint do estado do DJ não confia em owner_id enviado pelo navegador.
+        # Registre a autoria do item enquanto ela ainda está disponível no banco.
+        hub.expect_music(row["channel_id"], row["video_id"], row["added_by"] or me.id)
     await pool().execute("DELETE FROM queue_items WHERE id = $1", row["id"])
     return await announce_queue(row["channel_id"])
 
