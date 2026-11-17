@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { RoomClient } from "@/components/room/room-client";
-import { normalizeKey } from "@/lib/room-key";
+import { normalizeKey, roomNameFromKey } from "@/lib/room-key";
 
 async function Room({ params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   const clean = normalizeKey(decodeURIComponent(key));
-  if (clean.length < 3) notFound();
+  if (!roomNameFromKey(clean)) notFound();
   return <RoomClient roomKey={clean} />;
 }
 

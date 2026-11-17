@@ -1,7 +1,33 @@
 import { AccessToken } from "livekit-server-sdk";
 import { roomNameFromKey } from "@/lib/room-key";
 
+const attempts = new Map<string, number[]>();
+const WINDOW_MS = 60_000;
+const MAX_ATTEMPTS = 15;
+
+function clientIp(request: Request): string {
+  return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+}
+
+export function guestTokenRateLimited(id: string, now = Date.now()): boolean {
+  if (attempts.size > 5_000) {
+    for (const [key, values] of attempts) if (!values.some((at) => now - at < WINDOW_MS)) attempts.delete(key);
+    if (attempts.size > 5_000 && !attempts.has(id)) return true;
+  }
+  const recent = (attempts.get(id) || []).filter((at) => now - at < WINDOW_MS);
+  if (recent.length >= MAX_ATTEMPTS) {
+    attempts.set(id, recent);
+    return true;
+  }
+  recent.push(now);
+  attempts.set(id, recent);
+  return false;
+}
+
 export async function POST(request: Request) {
+  if (guestTokenRateLimited(clientIp(request))) {
+    return Response.json({ error: "Muitas tentativas. Espere um minuto." }, { status: 429, headers: { "Cache-Control": "no-store" } });
+  }
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   const url = process.env.LIVEKIT_URL;
@@ -12,7 +38,7 @@ export async function POST(request: Request) {
         error:
           "Servidor sem configuração do LiveKit. Cadastre LIVEKIT_URL, LIVEKIT_API_KEY e LIVEKIT_API_SECRET no .env.local do site (ou nas variáveis de ambiente da Vercel).",
       },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -20,23 +46,23 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: "Pedido inválido." }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 
   const key = typeof body.key === "string" ? body.key : "";
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 32) : "";
   const room = roomNameFromKey(key);
 
-  if (!room) return Response.json({ error: "Chave da sala inválida." }, { status: 400 });
-  if (!name) return Response.json({ error: "Digite um nome." }, { status: 400 });
+  if (!room) return Response.json({ error: "Chave da sala inválida ou curta demais." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  if (!name) return Response.json({ error: "Digite um nome." }, { status: 400, headers: { "Cache-Control": "no-store" } });
 
   // identidade única, assim duas pessoas com o mesmo nome não se derrubam
-  const identity = `${name}#${crypto.randomUUID().slice(0, 6)}`;
+  const identity = `${name}#${crypto.randomUUID()}`;
 
   const token = new AccessToken(apiKey, apiSecret, {
     identity,
     name,
-    ttl: "12h",
+    ttl: "10m",
   });
   token.addGrant({
     roomJoin: true,
@@ -46,5 +72,5 @@ export async function POST(request: Request) {
     canPublishData: true,
   });
 
-  return Response.json({ token: await token.toJwt(), url, identity });
+  return Response.json({ token: await token.toJwt(), url, identity }, { headers: { "Cache-Control": "no-store" } });
 }

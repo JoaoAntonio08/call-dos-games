@@ -12,7 +12,7 @@ from typing import Any, Iterable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from .core import parse_id, pool, sid, user_from_token
+from .core import parse_id, pool, settings, sid, user_from_token
 
 router = APIRouter()
 
@@ -88,8 +88,8 @@ class Hub:
         rows = await pool().fetch(
             """
             SELECT m2.user_id AS id FROM members m1 JOIN members m2 ON m2.server_id = m1.server_id WHERE m1.user_id = $1
-            UNION SELECT addressee_id FROM friendships WHERE requester_id = $1
-            UNION SELECT requester_id FROM friendships WHERE addressee_id = $1
+            UNION SELECT addressee_id FROM friendships WHERE requester_id = $1 AND status = 'accepted'
+            UNION SELECT requester_id FROM friendships WHERE addressee_id = $1 AND status = 'accepted'
             UNION SELECT d2.user_id FROM dm_participants d1 JOIN dm_participants d2 ON d2.channel_id = d1.channel_id WHERE d1.user_id = $1
             """,
             user_id,
@@ -100,6 +100,10 @@ class Hub:
 
     async def to_audience(self, user_id: int, event: str, data: Any) -> None:
         await self.send(await self.audience_of(user_id), event, data)
+
+    async def visible_games(self, user_id: int) -> dict[str, dict[str, Any]]:
+        audience = await self.audience_of(user_id)
+        return {sid(uid): game for uid, game in self.games.items() if uid in audience}
 
     async def broadcast_presence(self, user_id: int) -> None:
         row = await pool().fetchrow("SELECT status, custom_status FROM users WHERE id = $1", user_id)
@@ -187,6 +191,17 @@ class Hub:
 hub = Hub()
 
 
+def websocket_origin_allowed(origin: str | None) -> bool:
+    # Clientes nativos não enviam Origin. Navegadores sempre enviam e precisam estar na allowlist.
+    return not origin or origin.rstrip("/") in settings.ws_origins
+
+
+async def websocket_session_valid(token: str, user_id: int) -> bool:
+    """A revogação de uma sessão também encerra o gateway já conectado."""
+    found = await user_from_token(token)
+    return bool(found and found[0] == user_id)
+
+
 async def can_access_channel(user_id: int, channel_id: int) -> dict | None:
     row = await pool().fetchrow(
         """
@@ -212,15 +227,22 @@ async def can_access_channel(user_id: int, channel_id: int) -> dict | None:
 
 @router.websocket("/gateway")
 async def gateway(ws: WebSocket) -> None:
+    if not websocket_origin_allowed(ws.headers.get("origin")):
+        await ws.close(code=1008, reason="origin")
+        return
     await ws.accept()
     # 1ª mensagem precisa ser {"op": "auth", "token": "..."} (o token não vai na URL para não cair em log)
     try:
         first = json.loads(await asyncio.wait_for(ws.receive_text(), timeout=10))
-        found = await user_from_token(str(first.get("token", ""))) if first.get("op") == "auth" else None
+        auth_token = str(first.get("token", "")) if first.get("op") == "auth" else ""
+        found = await user_from_token(auth_token) if auth_token else None
     except Exception:
         found = None
     if not found:
-        await ws.close(code=4001, reason="auth")
+        try:
+            await ws.close(code=4001, reason="auth")
+        except (WebSocketDisconnect, RuntimeError):
+            pass
         return
     user_id, _ = found
     was_online = hub.online(user_id)
@@ -232,9 +254,14 @@ async def gateway(ws: WebSocket) -> None:
            UNION SELECT channel_id FROM dm_participants WHERE user_id = $1""",
         user_id,
     )
-    voice = hub.voice_snapshot([int(r["id"]) for r in rows])
-    games = {sid(uid): g for uid, g in hub.games.items()}
-    music = hub.music_snapshot([int(r["id"]) for r in rows])
+    visible_channels = []
+    for row in rows:
+        cid = int(row["id"])
+        if await can_access_channel(user_id, cid):
+            visible_channels.append(cid)
+    voice = hub.voice_snapshot(visible_channels)
+    games = await hub.visible_games(user_id)
+    music = hub.music_snapshot(visible_channels)
     await ws.send_text(json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice, "music": music, "games": games}}))
     if not was_online:
         await hub.broadcast_presence(user_id)
@@ -242,6 +269,9 @@ async def gateway(ws: WebSocket) -> None:
     try:
         while True:
             raw_text = await ws.receive_text()
+            if not await websocket_session_valid(auth_token, user_id):
+                await ws.close(code=4001, reason="auth")
+                break
             try:
                 await handle(user_id, ws, json.loads(raw_text))
             except WebSocketDisconnect:

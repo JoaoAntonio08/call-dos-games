@@ -693,6 +693,11 @@ function AccountTab() {
         <p className="text-[15px]">{me.email ?? "—"}</p>
         {me.has_google && <Tip>Conta ligada ao Google: dá para entrar pelo botão do Google.</Tip>}
       </Section>
+      {!me.has_google && me.has_password && me.email && (
+        <Section title="Ligar o Google" hint="Por segurança, confirme a senha desta conta e use no Google exatamente o mesmo e-mail verificado.">
+          <GoogleLinkControl />
+        </Section>
+      )}
       <Section title="Usuário" hint="Letras minúsculas, números, ponto e _. É assim que a turma te adiciona. Dá para trocar quando quiser, desde que ninguém esteja usando.">
         <UsernameField key={me.username} current={me.username} onSave={(username) => save({ username }).then((r) => r && toast(`Agora você é @${username}.`))} />
       </Section>
@@ -722,6 +727,64 @@ function AccountTab() {
           {ok && <p className="text-[13.5px] text-moss">{ok}</p>}
         </form>
       </Section>
+    </div>
+  );
+}
+
+function GoogleLinkControl() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [password, setPassword] = useState("");
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ google_client_id: string | null }>("/auth/config")
+      .then((c) => setClientId(c.google_client_id))
+      .catch(() => setClientId(null));
+  }, []);
+
+  useEffect(() => {
+    if (!clientId || !password || !ref.current) return;
+    const el = ref.current;
+    el.replaceChildren();
+    const render = () => {
+      window.google!.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }) => {
+          setBusy(true);
+          setError("");
+          try {
+            await api("/auth/google/link", { json: { credential, password } });
+            useStore.setState((s) => ({ me: s.me ? { ...s.me, has_google: true } : s.me }));
+            toast("Conta ligada ao Google.");
+          } catch (err) {
+            setError(errorText(err));
+          } finally {
+            setBusy(false);
+          }
+        },
+      });
+      window.google!.accounts.id.renderButton(el, { theme: "filled_black", size: "large", shape: "pill", text: "continue_with", locale: "pt-BR", width: 320 });
+    };
+    if (window.google) return render();
+    let script = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
+    if (!script) {
+      script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener("load", render, { once: true });
+    return () => script?.removeEventListener("load", render);
+  }, [clientId, password]);
+
+  if (!clientId) return <Tip>O login com Google não está configurado neste servidor.</Tip>;
+  return (
+    <div className="space-y-3">
+      <input className="field" type="password" placeholder="Senha atual" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+      {password && <div ref={ref} aria-busy={busy} className="min-h-11 [color-scheme:light]" />}
+      <FormError>{error}</FormError>
     </div>
   );
 }

@@ -205,7 +205,7 @@ export function BotsTab({ server }: { server: Server }) {
   const [channelId, setChannelId] = useState(text[0]?.id ?? "");
   const [hooks, setHooks] = useState<Hook[]>([]);
   const [name, setName] = useState("");
-  const [created, setCreated] = useState<{ name: string; url: string } | null>(null);
+  const [created, setCreated] = useState<{ name: string; url: string; token: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
@@ -219,7 +219,7 @@ export function BotsTab({ server }: { server: Server }) {
   async function create() {
     setError("");
     try {
-      const r = await api<{ id: string; name: string; url: string }>(`/channels/${channelId}/webhooks`, { json: { name } });
+      const r = await api<{ id: string; name: string; url: string; token: string }>(`/channels/${channelId}/webhooks`, { json: { name } });
       setCreated(r);
       setName("");
       setHooks(await api<Hook[]>(`/channels/${channelId}/webhooks`));
@@ -276,25 +276,26 @@ export function BotsTab({ server }: { server: Server }) {
       </form>
       {created && (
         <div className="mt-4 rounded-[14px] border border-honey/40 bg-honey/10 p-4">
-          <p className="text-[13.5px] font-semibold text-honey">Copie o link agora: ele não aparece de novo.</p>
-          <div className="mt-2 flex gap-2">
-            <input readOnly value={created.url} className="field flex-1 font-mono text-[12px]" aria-label="Link do webhook" onFocus={(e) => e.currentTarget.select()} />
+          <p className="text-[13.5px] font-semibold text-honey">Copie o token agora: ele não aparece de novo.</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <input readOnly value={created.url} className="field font-mono text-[12px]" aria-label="Endereço do webhook" onFocus={(e) => e.currentTarget.select()} />
+            <input readOnly value={created.token} className="field font-mono text-[12px]" aria-label="Token do webhook" onFocus={(e) => e.currentTarget.select()} />
             <button
               type="button"
               className="btn-quiet h-[46px] px-3.5"
               onClick={() => {
-                void navigator.clipboard.writeText(created.url).then(() => {
+                void navigator.clipboard.writeText(`curl -H "Authorization: Bearer ${created.token}" -H "Content-Type: application/json" -d '{"content":"oi!"}' "${created.url}"`).then(() => {
                   setCopied(true);
                   window.setTimeout(() => setCopied(false), 1500);
                 });
               }}
-              aria-label="Copiar link do webhook"
+              aria-label="Copiar exemplo seguro do webhook"
             >
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             </button>
           </div>
           <Tip>
-            Teste: <code className="rounded bg-cocoa-0 px-1">{`curl -H "Content-Type: application/json" -d '{"content":"oi!"}' LINK`}</code>
+            Envie o token no cabeçalho <code>Authorization: Bearer …</code> ou <code>X-Webhook-Token</code>. O botão copia um exemplo pronto; o segredo não fica na URL nem nos access logs.
           </Tip>
         </div>
       )}

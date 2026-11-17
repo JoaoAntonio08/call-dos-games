@@ -32,10 +32,17 @@ class Settings:
     public_url = env("PUBLIC_URL", "http://localhost:8000").rstrip("/")
     frontend_url = env("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     cors_origins = [o.strip().rstrip("/") for o in env("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+    ws_origins = [o.strip().rstrip("/") for o in env("WS_ORIGINS", ",".join(cors_origins)).split(",") if o.strip()]
+    api_docs = env("ENABLE_API_DOCS", "0") == "1"
     upload_dir = (ROOT / env("UPLOAD_DIR", "./uploads")).resolve()
+    upload_user_quota_mb = max(1, int(env("UPLOAD_USER_QUOTA_MB", "500")))
+    upload_total_quota_mb = max(upload_user_quota_mb, int(env("UPLOAD_TOTAL_QUOTA_MB", "8192")))
+    upload_min_free_mb = max(128, int(env("UPLOAD_MIN_FREE_MB", "1024")))
+    upload_rate_per_hour = max(1, int(env("UPLOAD_RATE_PER_HOUR", "60")))
     livekit_url = env("LIVEKIT_URL")
     livekit_key = env("LIVEKIT_API_KEY")
     livekit_secret = env("LIVEKIT_API_SECRET")
+    livekit_token_ttl = max(60, min(900, int(env("LIVEKIT_TOKEN_TTL_SECONDS", "300"))))
     google_client_id = env("GOOGLE_CLIENT_ID")
     resend_key = env("RESEND_API_KEY")
     email_from = env("EMAIL_FROM")
@@ -47,8 +54,8 @@ class Settings:
     steam_key = env("STEAM_API_KEY")
     # opcional: /tocar pelo nome da música (console.cloud.google.com, YouTube Data API v3)
     youtube_key = env("YOUTUBE_API_KEY")
-    # quem administra a plataforma toda (vê o uso de todos os servidores); nomes de usuário separados por vírgula
-    platform_admins = {u.strip().lower().lstrip("@") for u in env("PLATFORM_ADMINS", "djpizza").split(",") if u.strip()}
+    # ids imutáveis de quem administra a plataforma toda; vazio por padrão é fail-closed
+    platform_admin_ids = {int(v) for v in env("PLATFORM_ADMIN_IDS").split(",") if v.strip().isdigit() and int(v) > 0}
 
 
 settings = Settings()

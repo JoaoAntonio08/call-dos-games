@@ -4,7 +4,7 @@ Cada app mede quantos bytes mandou de tela/câmera (estatística do WebRTC) e av
 O que sai do servidor de voz é isso vezes quem está assistindo (as outras pessoas da call).
 
 Quem vê e limita: dono e admins do servidor, cargos com a permissão "uso" e os admins da plataforma
-(PLATFORM_ADMINS no .env, por nome de usuário). Uma restrição tira a tela e a câmera da pessoa
+(PLATFORM_ADMIN_IDS no .env, por id imutável de usuário). Uma restrição tira a tela e a câmera da pessoa
 (o microfone continua). Pode ser manual (por um tempo ou até liberar) ou automática, quando a pessoa
 passa do limite de GB do servidor no dia ou no mês.
 """
@@ -32,12 +32,12 @@ MAX_REPORT_BYTES = 1_000_000_000
 PLATFORM = 0  # "escopo" das restrições que valem em todos os servidores
 
 
-def is_platform_admin(username: str | None) -> bool:
-    return bool(username) and username.lower() in settings.platform_admins  # type: ignore[union-attr]
+def is_platform_admin(user_id: int) -> bool:
+    return user_id in settings.platform_admin_ids
 
 
 async def platform_admin(user_id: int) -> bool:
-    return is_platform_admin(await pool().fetchval("SELECT username FROM users WHERE id = $1", user_id))
+    return is_platform_admin(user_id)
 
 
 async def require_usage(server_id: int, user_id: int) -> str:
@@ -70,18 +70,10 @@ async def active_block(server_id: int | None, user_id: int) -> dict | None:
 
 
 async def reapply(user_id: int, server_id: int | None) -> None:
-    """Aplica de novo as permissões de quem está numa call (deste servidor, ou qualquer uma se None)."""
-    from .voz import apply_permissions, mods_of
+    """Aplica de novo as permissões inclusive em conexões não anunciadas no gateway."""
+    from .voz import refresh_user_voice
 
-    cid = hub.user_voice.get(user_id)
-    if cid is None:
-        return
-    srv = await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", cid)
-    if server_id is not None and srv != server_id:
-        return
-    mods = await mods_of(srv, user_id)
-    await apply_permissions(cid, user_id, mods)
-    await hub.refresh_mods(cid, user_id, mods)
+    await refresh_user_voice(user_id, server_id)
 
 
 async def set_block(scope: int, user_id: int, until: datetime | None, reason: str, by: int | None) -> None:

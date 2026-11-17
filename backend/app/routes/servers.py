@@ -270,6 +270,10 @@ async def delete_server(server_id: str, me: Auth = CurrentUser) -> dict:
     if await require_member(s, me.id) != "owner":
         raise err(403, "Só quem criou o servidor pode apagar.")
     members = [r["user_id"] for r in await pool().fetch("SELECT user_id FROM members WHERE server_id = $1", s)]
+    from .voz import revoke_server_voice
+
+    for user_id in members:
+        await revoke_server_voice(s, user_id)
     await pool().execute("DELETE FROM servers WHERE id = $1", s)
     await hub.send(members, "server_delete", {"id": sid(s)})
     return {"ok": True}
@@ -289,6 +293,9 @@ async def remove_member(server_id: str, user_id: str, me: Auth = CurrentUser) ->
     elif ROLE_RANK[my_role] <= ROLE_RANK[target_role] or ROLE_RANK[my_role] < 1:
         raise err(403, "Você não pode remover essa pessoa.")
     await pool().execute("DELETE FROM members WHERE server_id = $1 AND user_id = $2", s, target)
+    from .voz import revoke_server_voice
+
+    await revoke_server_voice(s, target)
     await hub.send([target], "server_delete", {"id": sid(s)})
     await announce_server(s)
     return {"ok": True}
@@ -330,6 +337,9 @@ async def update_member(server_id: str, user_id: str, body: MemberPatch, me: Aut
                 await con.execute("UPDATE servers SET owner_id = $1 WHERE id = $2", target, s)
         else:
             await pool().execute("UPDATE members SET role = $1 WHERE server_id = $2 AND user_id = $3", body.role, s, target)
+        from .voz import refresh_user_voice
+
+        await refresh_user_voice(target, s)
     await announce_server(s)
     return {"ok": True}
 
@@ -438,6 +448,9 @@ async def set_member_roles(server_id: str, user_id: str, body: MemberRolesIn, me
         for rid in ids:
             await con.execute("INSERT INTO member_roles (server_id, user_id, role_id) VALUES ($1,$2,$3)", s, target, rid)
     await announce_server(s)
+    from .voz import refresh_user_voice
+
+    await refresh_user_voice(target, s)
     return {"ok": True}
 
 
@@ -507,6 +520,10 @@ async def update_channel(channel_id: str, body: ChannelPatch, me: Auth = Current
         await pool().execute("UPDATE channels SET send_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.send_roles), cid)
     if body.user_limit is not None and ch["type"] == "voice":
         await pool().execute("UPDATE channels SET user_limit = $1 WHERE id = $2", max(0, min(99, body.user_limit)), cid)
+    if ch["type"] == "voice" and (body.view_roles is not None or body.send_roles is not None):
+        from .voz import refresh_channel_voice
+
+        await refresh_channel_voice(cid)
     await announce_server(ch["server_id"])
     return channel_out(await pool().fetchrow("SELECT * FROM channels WHERE id = $1", cid))
 
@@ -518,6 +535,13 @@ async def delete_channel(channel_id: str, me: Auth = CurrentUser) -> dict:
     if not ch or ch["server_id"] is None:
         raise err(404, "Canal não encontrado.")
     await require_admin(ch["server_id"], me.id)
+    if ch["type"] == "voice":
+        from .voz import livekit, revoke_voice_participant, room_name
+
+        for user_id in list(hub.voice.get(cid, {})):
+            await revoke_voice_participant(cid, user_id, "Esta call foi removida.")
+        # DeleteRoom também remove participantes que nunca anunciaram estado no gateway.
+        await livekit("DeleteRoom", room_name(cid), {})
     await pool().execute("DELETE FROM channels WHERE id = $1", cid)
     await announce_server(ch["server_id"])
     return {"ok": True}

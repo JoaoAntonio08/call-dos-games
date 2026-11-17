@@ -9,22 +9,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import ipaddress
 import json
-import os
 import random
 import re
-import socket
 import time
 from collections import deque
 from typing import Any
-from urllib.parse import urlparse
-
-import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..core import Auth, CurrentUser, err, parse_id, pool, sid
+from ..outbound import post_public_https, public_https_target
 from ..realtime import can_access_channel, hub
 
 router = APIRouter()
@@ -32,8 +27,6 @@ router = APIRouter()
 # mensagens dos comandos da casa saem com este "bot"
 HOUSE_BOT_ID = 1
 HOUSE_BOT_NAME = "Call dos Games"
-# só para testes locais: deixa o bot ficar no próprio PC/rede
-ALLOW_PRIVATE = os.environ.get("BOT_ALLOW_PRIVATE") == "1"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 
 BUILTIN: dict[str, str] = {
@@ -182,24 +175,6 @@ async def builtin_reply(name: str, args: str, ch: dict, user_id: int, me_name: s
 
 
 # ------------------------------------------------------------------ os dos bots
-def _public_host(url: str) -> bool:
-    try:
-        u = urlparse(url)
-        if u.scheme != "https" and not (ALLOW_PRIVATE and u.scheme == "http"):
-            return False
-        host = u.hostname or ""
-        infos = socket.getaddrinfo(host, u.port or (443 if u.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
-    except Exception:
-        return False
-    if ALLOW_PRIVATE:
-        return True
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if not ip.is_global:
-            return False
-    return True
-
-
 def hook_content(body: Any) -> tuple[str, str]:
     """Mesmo formato básico do Discord: content + embeds simples (viram texto) + username."""
     if isinstance(body, str):
@@ -216,8 +191,6 @@ def hook_content(body: Any) -> tuple[str, str]:
 
 async def call_bot(bot: dict, name: str, args: str, ch: dict, user_id: int, me_name: str, message_id: str) -> tuple[str, str]:
     url = bot["command_url"]
-    if not await asyncio.to_thread(_public_host, url):
-        return f"⚠️ O endereço de comandos do bot {bot['name']} não é aceito (precisa ser https e público).", HOUSE_BOT_NAME
     payload = json.dumps(
         {
             "type": "command",
@@ -233,14 +206,20 @@ async def call_bot(bot: dict, name: str, args: str, ch: dict, user_id: int, me_n
     # assinatura: HMAC-SHA256 do corpo, com chave = sha256 do token do webhook (o bot sabe o token)
     sig = hmac.new(bot["token_hash"].encode(), payload, hashlib.sha256).hexdigest()
     try:
-        async with httpx.AsyncClient(timeout=6, follow_redirects=False) as c:
-            r = await c.post(url, content=payload, headers={"Content-Type": "application/json", "X-CDG-Signature": f"sha256={sig}", "User-Agent": "CallDosGames-Bot/1"})
-    except Exception:
+        r = await asyncio.to_thread(
+            post_public_https,
+            url,
+            payload,
+            {"Content-Type": "application/json", "X-CDG-Signature": f"sha256={sig}", "User-Agent": "CallDosGames-Bot/1"},
+        )
+    except ValueError:
+        return f"⚠️ O endereço de comandos do bot {bot['name']} não é aceito (precisa ser HTTPS público).", HOUSE_BOT_NAME
+    except (OSError, TimeoutError):
         return f"⚠️ O bot {bot['name']} não respondeu.", HOUSE_BOT_NAME
-    if r.status_code == 204 or not r.content:
+    if r.status == 204 or not r.content:
         return "", ""  # o bot vai responder depois pelo webhook, se quiser
-    if r.status_code >= 400:
-        return f"⚠️ O bot {bot['name']} deu erro ({r.status_code}).", HOUSE_BOT_NAME
+    if r.status >= 300:
+        return f"⚠️ O bot {bot['name']} deu erro ({r.status}).", HOUSE_BOT_NAME
     try:
         body = r.json() if len(r.content) <= 64 * 1024 else None
     except Exception:
@@ -339,8 +318,11 @@ async def set_bot_commands(webhook_id: str, body: BotCommandsIn, me: Auth = Curr
         raise err(404, "Webhook não encontrado.")
     await _text_channel_admin(cid, me.id)
     url = body.command_url.strip()[:500]
-    if url and not (url.startswith("https://") or (ALLOW_PRIVATE and url.startswith("http://"))):
-        raise err(400, "O endereço de comandos precisa começar com https://")
+    if url:
+        try:
+            await asyncio.to_thread(public_https_target, url)
+        except ValueError:
+            raise err(400, "O endereço de comandos precisa ser HTTPS público na porta 443.")
     names: list[str] = []
     for c in body.commands[:20]:
         c = c.strip().lstrip("/").lower()
