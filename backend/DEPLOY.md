@@ -167,6 +167,8 @@ Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reco
 - **Música:** `/tocar nome ou link` põe na fila da call de quem pediu; `/fila` e `/pular` também. O comando e a resposta só aparecem para quem digitou e somem em 12 horas. Só quem pôs a música (ou DJ/admin) pausa e pula; os outros votam (mais da metade da call pula). Cada um tem o próprio volume.
 - **Bots sem código** (Configurações do servidor → Bots): o bot junta módulos (música, diversão, enquete, boas-vindas, respostas automáticas, filtro de palavras, lembretes e cargo automático), escolhendo canais e cargos. Lembretes usam o horário de Brasília.
 - **Bot de jogos** (módulo Jogos no criador de bots): `/jogo nome` procura o jogo na Steam (preço em reais, gêneros, lançamento, nota) e `/gratis` mostra os jogos que estão de graça na Steam agora. Se escolher um canal em "Avisar jogos grátis da Steam sozinho em", a API posta lá cada jogo grátis novo (confere a cada 30 minutos). Usa a loja da Steam e o GamerPower, **sem chave**.
+  - `FREE_GAMES_CHECK_SECONDS` ajusta o intervalo (padrão `1800`, limitado entre `300` e `86400`).
+  - `STEAM_STORE_BASE` e `GAMERPOWER_BASE` são substituições para laboratório; em produção, deixe-as ausentes para usar os endpoints oficiais.
 - **DJ da call:** quando a música toca, aparece um "DJ" na lista da sala de voz (todo mundo vê, mesmo quem está fora) e avisos de "tocando agora" e "entrou na fila". A música segue num mini player no canto quando a pessoa vai para um canal de texto, sem sair da call.
 
 ### Salas, avisos e app de Windows
@@ -180,7 +182,7 @@ Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reco
 - O app de cada pessoa conta a cada 30 segundos quanto ela enviou de tela e câmera; a API multiplica por quem está assistindo ("saindo do servidor", o que pesa na banda). Voz, música e YouTube junto não entram.
 - **Configurações do servidor → Uso** (dono, admins e cargos com a permissão "Ver uso"): ranking de hoje, 7 ou 30 dias, quem está ao vivo, **Restringir** (1 hora, 1 dia, 7 dias ou até liberar) e **Liberar**. Restringido fica sem tela e câmera naquele servidor, com aviso; o microfone continua.
 - **Limite automático** na mesma aba: X GB por pessoa por dia ou por mês. Quem passa fica sem tela e câmera até o fim do dia/mês (horário de Brasília). Dono e admins não entram no limite.
-- **Admin da plataforma:** use `PLATFORM_ADMIN_IDS=123456...` no `backend/.env` (IDs imutáveis separados por vírgula). Vazio significa que ninguém tem esse poder. O ID aparece no perfil técnico/API e não muda quando o `@` muda.
+- **Admin da plataforma:** use `PLATFORM_ADMIN_IDS=123456...` no `backend/.env` (IDs imutáveis separados por vírgula). Vazio significa que ninguém tem esse poder. O ID aparece no perfil técnico/API e não muda quando o `@` muda. A variável antiga `PLATFORM_ADMINS`, baseada em nome, é ignorada e deve ser removida da configuração.
 
 ### Comandos de bot
 

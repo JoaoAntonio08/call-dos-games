@@ -21,7 +21,17 @@ from ..core import pool
 
 STEAM_STORE = os.environ.get("STEAM_STORE_BASE", "https://store.steampowered.com").rstrip("/")
 GAMERPOWER = os.environ.get("GAMERPOWER_BASE", "https://www.gamerpower.com").rstrip("/")
-CHECK_EVERY = int(os.environ.get("FREE_GAMES_CHECK_SECONDS", "1800"))
+
+
+def check_interval(raw: str | None) -> int:
+    try:
+        seconds = int(raw or "1800")
+    except ValueError:
+        seconds = 1800
+    return max(300, min(86400, seconds))
+
+
+CHECK_EVERY = check_interval(os.environ.get("FREE_GAMES_CHECK_SECONDS"))
 UA = {"User-Agent": "CallDosGames/1.0 (bot de jogos)"}
 
 _free_cache: tuple[float, list[dict]] | None = None

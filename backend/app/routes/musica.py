@@ -8,12 +8,13 @@ os outros votam para pular.
 from __future__ import annotations
 
 import os
+import re
 import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from ..core import Auth, CurrentUser, fetch_user, new_id, parse_id, pool, settings, sid
-from ..perms import Member
+from ..core import Auth, CurrentUser, err, fetch_user, new_id, parse_id, pool, settings, sid
+from ..perms import Member, member as perms_member
 from ..realtime import hub
 from .extras import announce_queue, parse_youtube, youtube_info
 
@@ -54,8 +55,23 @@ _titles: dict[str, tuple[str, str]] = {}
 class NowPlayingIn(BaseModel):
     channel_id: str
     video_id: str | None = None
+    # Compatibilidade temporária com clientes v1.5. O backend nunca confia neste valor.
     owner_id: str | None = None
     playing: bool = True
+
+
+async def _can_control_music(channel_id: int, user_id: int) -> bool:
+    current = hub.music.get(channel_id)
+    if not current:
+        return True
+    owner_id = int(current["owner_id"])
+    if user_id in (owner_id, hub.music_controllers.get(channel_id)):
+        return True
+    channel = await pool().fetchrow("SELECT server_id FROM channels WHERE id = $1", channel_id)
+    if not channel or channel["server_id"] is None:
+        return False
+    who = await perms_member(channel["server_id"], user_id)
+    return bool(who and who.can("dj"))
 
 
 @router.post("/voice/music")
@@ -64,20 +80,31 @@ async def now_playing(body: NowPlayingIn, me: Auth = CurrentUser) -> dict:
     cid = parse_id(body.channel_id)
     if hub.user_voice.get(me.id) != cid:
         return {"ok": False}
+    current = hub.music.get(cid)
     if not body.video_id:
+        if current and not await _can_control_music(cid, me.id):
+            raise err(403, "Só quem controla a música pode encerrá-la.")
         await hub.set_music(cid, None)
         return {"ok": True}
-    vid = body.video_id[:11]
-    cur = hub.music.get(cid)
-    if cur and cur["video_id"] == vid and cur["playing"] == body.playing:
+    vid = body.video_id
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+        raise err(400, "Vídeo inválido.")
+    if current and current["video_id"] == vid and current["playing"] == body.playing:
         return {"ok": True}
+    if current and not await _can_control_music(cid, me.id):
+        raise err(403, "Só quem controla a música pode alterá-la.")
     if vid not in _titles:
         if len(_titles) > 2000:
             _titles.clear()
         _titles[vid] = await youtube_info(vid)
     title, author = _titles[vid]
-    owner = parse_id(body.owner_id) if body.owner_id and body.owner_id.isdigit() else me.id
+    if current and current["video_id"] == vid:
+        owner = int(current["owner_id"])
+    else:
+        owner = hub.consume_expected_music(cid, vid) or me.id
     who = await fetch_user(owner)
+    if not current or current["video_id"] != vid:
+        hub.music_controllers[cid] = me.id
     await hub.set_music(
         cid,
         {

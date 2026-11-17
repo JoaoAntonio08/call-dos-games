@@ -24,6 +24,10 @@ class Hub:
         self.voice: dict[int, dict[int, dict[str, Any]]] = {}
         # o que o "DJ" está tocando em cada call (aparece como um participante a mais)
         self.music: dict[int, dict[str, Any]] = {}
+        # controlador efetivo e autoria esperada de um item retirado da fila.
+        # Esses metadados nunca são enviados aos clientes.
+        self.music_controllers: dict[int, int] = {}
+        self.music_expected: dict[int, tuple[str, int, float]] = {}
         self.user_voice: dict[int, int] = {}
         # o que cada um está jogando agora: a Steam tem preferência, depois o jogo que o app de Windows achou
         self.games: dict[int, dict[str, Any]] = {}
@@ -128,8 +132,27 @@ class Hub:
         ids = self.music.keys() if channel_ids is None else channel_ids
         return {str(cid): self.music[cid] for cid in ids if cid in self.music}
 
+    def expect_music(self, channel_id: int, video_id: str, owner_id: int) -> None:
+        """Registra por pouco tempo a autoria confiável de um item iniciado pela fila."""
+        self.music_expected[channel_id] = (video_id, owner_id, time.monotonic() + 30)
+
+    def consume_expected_music(self, channel_id: int, video_id: str) -> int | None:
+        expected = self.music_expected.get(channel_id)
+        if not expected:
+            return None
+        expected_video, owner_id, expires_at = expected
+        if expires_at < time.monotonic():
+            self.music_expected.pop(channel_id, None)
+            return None
+        if expected_video != video_id:
+            return None
+        self.music_expected.pop(channel_id, None)
+        return owner_id
+
     async def set_music(self, channel_id: int, music: dict[str, Any] | None) -> None:
         if music is None:
+            self.music_controllers.pop(channel_id, None)
+            self.music_expected.pop(channel_id, None)
             if self.music.pop(channel_id, None) is None:
                 return
         else:

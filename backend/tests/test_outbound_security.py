@@ -134,6 +134,12 @@ def test_oversized_callback_response_is_rejected(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_command_callback_does_not_follow_redirect(monkeypatch):
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    # A política de redirect é síncrona; não deixe um executor global sobreviver
+    # ao event loop do teste e interferir na próxima função assíncrona da suíte.
+    monkeypatch.setattr(comandos.asyncio, "to_thread", run_inline)
     monkeypatch.setattr(
         comandos,
         "post_public_https",
