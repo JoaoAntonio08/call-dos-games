@@ -321,9 +321,6 @@ export function ForgotForm() {
         <div className="rounded-[14px] bg-cocoa-3 p-5 text-[14px] leading-relaxed text-oat/80">
           Se existir uma conta com <strong className="text-oat">{email}</strong>, o link para criar uma senha nova chega em alguns
           minutos. Olhe também o spam.
-          <p className="mt-3 text-[12.5px] text-oat/45">
-            Sem e-mail configurado no servidor, o link aparece no terminal de quem hospeda. Peça para essa pessoa.
-          </p>
         </div>
       ) : (
         <form
@@ -355,12 +352,17 @@ export function ForgotForm() {
 }
 
 export function ResetForm() {
-  const params = useSearchParams();
   const finish = useFinish();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const token = params.get("token") ?? "";
+  const [token, setResetToken] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const value = params.get("token") ?? "";
+    queueMicrotask(() => setResetToken(value));
+    if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
   return (
     <AuthFrame kicker="Quase lá" title="Escolha uma senha nova">
       <form
@@ -369,7 +371,7 @@ export function ResetForm() {
           setBusy(true);
           setError("");
           try {
-            finish(await api<Session>("/auth/reset", { json: { token, password } }));
+            finish(await api<Session>("/auth/reset", { json: { token: token ?? "", password } }));
           } catch (err) {
             setError(errorText(err));
             setBusy(false);
@@ -379,8 +381,8 @@ export function ResetForm() {
         <Field label="Senha nova (8 caracteres ou mais)">
           <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoFocus autoComplete="new-password" />
         </Field>
-        <FormError>{error || (!token ? "Link incompleto. Abra o link do e-mail de novo." : "")}</FormError>
-        <Submit busy={busy}>Salvar e entrar</Submit>
+        <FormError>{error || (token === "" ? "Link incompleto. Abra o link do e-mail de novo." : "")}</FormError>
+        <Submit busy={busy || token === null}>Salvar e entrar</Submit>
       </form>
     </AuthFrame>
   );

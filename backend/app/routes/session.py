@@ -6,19 +6,24 @@ import json
 import time
 
 import jwt
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, Response
 from pydantic import BaseModel
 
 from ..core import Auth, CurrentUser, err, fetch_user, parse_id, pool, settings, sid, user_out
 from ..realtime import can_access_channel, hub
 from .servers import server_out
 from .users import friends_of, list_dms, me_out
+from .auth import set_session_cookie
 
 router = APIRouter()
 
 
 @router.get("/bootstrap")
-async def bootstrap(me: Auth = CurrentUser) -> dict:
+async def bootstrap(response: Response, authorization: str = Header(default=""), me: Auth = CurrentUser) -> dict:
+    # Renova o cookie usado apenas pelos GETs de mídia privada. Isso mantém
+    # sessões antigas funcionais depois do deploy sem expor o JWT em URLs.
+    if authorization.lower().startswith("bearer "):
+        set_session_cookie(response, authorization[7:].strip())
     server_ids = [r["server_id"] for r in await pool().fetch("SELECT server_id FROM members WHERE user_id = $1 ORDER BY joined_at", me.id)]
     servers = [await server_out(s, me.id) for s in server_ids]
     dms = await list_dms(me.id)
@@ -61,7 +66,7 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
         # canal de voz restrito: quem não tem o cargo só escuta
         "canPublish": bool(ch.get("can_send", True)),
         "canSubscribe": not mods["deaf"],
-        "canPublishData": True,
+        "canPublishData": bool(ch.get("can_send", True)),
     }
     src = publish_sources(mods["mute"], mods.get("noshare", False))
     if src == []:
@@ -74,7 +79,7 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
         "sub": str(me.id),
         "name": profile["display_name"],
         "nbf": now - 10,
-        "exp": now + 12 * 3600,
+        "exp": now + settings.livekit_token_ttl,
         # o resto da call lê foto, cor e som de entrada daqui
         "metadata": json.dumps(
             {

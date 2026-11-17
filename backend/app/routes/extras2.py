@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import secrets
 import time
 from collections import deque
 from typing import Any
+from urllib.parse import parse_qsl
 
 import httpx
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, Header, Request, UploadFile
 from pydantic import BaseModel
 
 from ..core import Auth, CurrentUser, err, file_url, new_id, parse_id, pool, settings, sid
-from ..files import save_upload
+from ..files import file_access_allowed, save_upload
 from ..realtime import hub
 from .servers import require_admin
 
@@ -77,8 +79,10 @@ class SaveStickerIn(BaseModel):
 async def save_sticker(body: SaveStickerIn, me: Auth = CurrentUser) -> list[dict]:
     """Salva na sua coleção uma figurinha que alguém mandou."""
     fid = parse_id(body.file_id)
-    row = await pool().fetchrow("SELECT name FROM files WHERE id = $1 AND kind = 'sticker'", fid)
+    row = await pool().fetchrow("SELECT id, owner_id, kind, name FROM files WHERE id = $1 AND kind = 'sticker'", fid)
     if not row:
+        raise err(404, "Figurinha não encontrada.")
+    if not await file_access_allowed(row, me):
         raise err(404, "Figurinha não encontrada.")
     await _room_for_sticker(me.id)
     name = re.sub(r"\.[a-z0-9]+$", "", row["name"], flags=re.I)[:40]
@@ -365,8 +369,8 @@ async def create_webhook(channel_id: str, body: WebhookIn, me: Auth = CurrentUse
     await pool().execute(
         "INSERT INTO webhooks (id, channel_id, name, token_hash, created_by) VALUES ($1,$2,$3,$4,$5)", wid, cid, name, _hash(token), me.id
     )
-    # o link completo só aparece agora: depois só dá para apagar e criar outro
-    return {"id": sid(wid), "name": name, "url": f"{settings.public_url}/webhooks/{sid(wid)}/{token}"}
+    # O token aparece uma vez, separado da URL, para não vazar em access logs.
+    return {"id": sid(wid), "name": name, "url": f"{settings.public_url}/webhooks/{sid(wid)}", "token": token}
 
 
 @router.delete("/webhooks/{webhook_id}")
@@ -381,15 +385,62 @@ async def delete_webhook(webhook_id: str, me: Auth = CurrentUser) -> dict:
 
 
 _hook_hits: dict[int, deque[float]] = {}
+WEBHOOK_BODY_LIMIT = 64 * 1024
 
 
-@router.post("/webhooks/{webhook_id}/{token}")
-async def run_webhook(webhook_id: str, token: str, request: Request) -> dict:
+async def read_webhook_body(request: Request) -> dict:
+    """Lê JSON/form simples sem permitir que um webhook esgote a memória da API."""
+    raw_length = request.headers.get("content-length", "")
+    if raw_length:
+        try:
+            if int(raw_length) > WEBHOOK_BODY_LIMIT:
+                raise err(413, "Webhook grande demais (máximo 64 KiB).")
+        except ValueError:
+            raise err(400, "Content-Length inválido.")
+
+    payload = bytearray()
+    async for chunk in request.stream():
+        payload += chunk
+        if len(payload) > WEBHOOK_BODY_LIMIT:
+            raise err(413, "Webhook grande demais (máximo 64 KiB).")
+    if not payload:
+        raise err(400, "Mande um JSON com o campo content.")
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type == "application/x-www-form-urlencoded":
+        try:
+            return dict(parse_qsl(payload.decode("utf-8", errors="strict"), keep_blank_values=True))
+        except UnicodeDecodeError:
+            raise err(400, "Formulário inválido.")
+    if content_type not in ("", "application/json", "text/json"):
+        raise err(415, "Use JSON ou formulário URL-encoded.")
+    try:
+        body = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        if not content_type:
+            try:
+                return dict(parse_qsl(payload.decode("utf-8", errors="strict"), keep_blank_values=True))
+            except UnicodeDecodeError:
+                pass
+        raise err(400, "JSON inválido.")
+    if not isinstance(body, dict):
+        raise err(400, "Mande um JSON com o campo content.")
+    return body
+
+
+@router.post("/webhooks/{webhook_id}")
+async def run_webhook(
+    webhook_id: str,
+    request: Request,
+    authorization: str = Header(default=""),
+    x_webhook_token: str = Header(default="", alias="X-Webhook-Token"),
+) -> dict:
     """Manda mensagem como bot. Aceita o mesmo formato básico do Discord: {"content": "...", "username": "..."}."""
     try:
         wid = parse_id(webhook_id)
     except Exception:
         raise err(404, "Webhook não encontrado.")
+    token = x_webhook_token or (authorization[7:].strip() if authorization.lower().startswith("bearer ") else "")
     row = await pool().fetchrow("SELECT id, channel_id, name, token_hash FROM webhooks WHERE id = $1", wid)
     if not row or not secrets.compare_digest(row["token_hash"], _hash(token)):
         raise err(404, "Webhook não encontrado.")
@@ -400,13 +451,7 @@ async def run_webhook(webhook_id: str, token: str, request: Request) -> dict:
     if len(q) >= 30:
         raise err(429, "Calma: no máximo 30 mensagens por minuto por webhook.")
     q.append(now)
-    try:
-        body = await request.json()
-    except Exception:
-        form = await request.form()
-        body = dict(form)
-    if not isinstance(body, dict):
-        raise err(400, "Mande um JSON com o campo content.")
+    body = await read_webhook_body(request)
     content = str(body.get("content") or "").strip()
     # embeds simples do Discord viram texto
     for e in (body.get("embeds") or [])[:5] if isinstance(body.get("embeds"), list) else []:

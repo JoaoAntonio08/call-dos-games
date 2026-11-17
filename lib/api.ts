@@ -47,7 +47,7 @@ export async function api<T = unknown>(path: string, opts: Opts = {}): Promise<T
 
   let res: Response;
   try {
-    res = await fetch(API_URL + path, { method: opts.method ?? (body ? "POST" : "GET"), headers, body, signal: opts.signal });
+    res = await fetch(API_URL + path, { method: opts.method ?? (body ? "POST" : "GET"), headers, body, signal: opts.signal, credentials: "include" });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new ApiError("Sem conexão com o servidor. Ele pode estar desligado.", 0);

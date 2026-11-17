@@ -37,7 +37,7 @@ async def me_out(user_id: int) -> dict[str, Any]:
     out.update({"email": extra["email"], "has_password": extra["has_password"], "has_google": extra["has_google"]})
     from .uso import is_platform_admin
 
-    out["platform_admin"] = is_platform_admin(row["username"])
+    out["platform_admin"] = is_platform_admin(user_id)
     return out
 
 
