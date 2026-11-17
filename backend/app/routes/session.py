@@ -56,9 +56,11 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
     if not ch or ch["type"] not in ("voice", "dm"):
         raise err(404, "Canal de voz não encontrado.")
     # sala cheia: só entra quem já está nela ou quem pode mover gente (admin / moderar call)
-    limit = await pool().fetchval("SELECT user_limit FROM channels WHERE id = $1", cid) or 0
     inside = hub.voice.get(cid, {})
-    if limit and me.id not in inside and len(inside) >= limit:
+    limit = 0
+    if inside and me.id not in inside:  # sala vazia nunca está cheia
+        limit = await pool().fetchval("SELECT user_limit FROM channels WHERE id = $1", cid) or 0
+    if limit and len(inside) >= limit:
         from ..perms import member as perms_member
 
         who = await perms_member(ch["server_id"], me.id) if ch.get("server_id") else None
