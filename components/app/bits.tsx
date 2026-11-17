@@ -260,15 +260,16 @@ export function Popover({
 /* diversos                                                            */
 /* ------------------------------------------------------------------ */
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${checked ? "bg-ember" : "bg-cocoa-5"}`}
+      className={`relative h-6 w-10 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${checked ? "bg-ember" : "bg-cocoa-5"}`}
     >
       <span className={`absolute left-0 top-1 size-4 rounded-full bg-oat transition-transform duration-200 ${checked ? "translate-x-5" : "translate-x-1"}`} />
     </button>

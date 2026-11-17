@@ -22,6 +22,8 @@ class Hub:
         self.sockets: dict[int, set[WebSocket]] = {}
         # canal de voz -> {usuário -> estado}
         self.voice: dict[int, dict[int, dict[str, Any]]] = {}
+        # o que o "DJ" está tocando em cada call (aparece como um participante a mais)
+        self.music: dict[int, dict[str, Any]] = {}
         self.user_voice: dict[int, int] = {}
         # o que cada um está jogando agora: a Steam tem preferência, depois o jogo que o app de Windows achou
         self.games: dict[int, dict[str, Any]] = {}
@@ -118,12 +120,25 @@ class Hub:
             if self.voice.get(cid)
         }
 
+    def music_snapshot(self, channel_ids: Iterable[int] | None = None) -> dict[str, dict[str, Any]]:
+        ids = self.music.keys() if channel_ids is None else channel_ids
+        return {str(cid): self.music[cid] for cid in ids if cid in self.music}
+
+    async def set_music(self, channel_id: int, music: dict[str, Any] | None) -> None:
+        if music is None:
+            if self.music.pop(channel_id, None) is None:
+                return
+        else:
+            self.music[channel_id] = music
+        await self.to_channel(channel_id, "music_state", {"channel_id": sid(channel_id), "music": music})
+
     async def set_voice(self, user_id: int, channel_id: int | None, state: dict[str, Any]) -> None:
         old = self.user_voice.get(user_id)
         if old is not None and old != channel_id:
             self.voice.get(old, {}).pop(user_id, None)
             if not self.voice.get(old):
                 self.voice.pop(old, None)
+                await self.set_music(old, None)  # call vazia: o DJ sai junto
             await self._announce_voice(old)
             self.user_voice.pop(user_id, None)
         if channel_id is not None:
@@ -219,7 +234,8 @@ async def gateway(ws: WebSocket) -> None:
     )
     voice = hub.voice_snapshot([int(r["id"]) for r in rows])
     games = {sid(uid): g for uid, g in hub.games.items()}
-    await ws.send_text(json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice, "games": games}}))
+    music = hub.music_snapshot([int(r["id"]) for r in rows])
+    await ws.send_text(json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice, "music": music, "games": games}}))
     if not was_online:
         await hub.broadcast_presence(user_id)
 

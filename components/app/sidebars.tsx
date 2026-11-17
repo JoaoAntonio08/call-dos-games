@@ -3,14 +3,16 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Hash, HeadphoneOff, LogOut, MicOff, Plus, Settings, Trophy, TvMinimalPlay, UserPlus, Users, Video, Volume2 } from "lucide-react";
+import { BellOff, ChevronDown, Hash, HeadphoneOff, LogOut, MicOff, Music2, Pause, Plus, Settings, Trophy, TvMinimalPlay, UserPlus, Users, Video, Volume2 } from "lucide-react";
 import { api, errorText } from "@/lib/api";
-import { isUnread, useStore, useUser, usePresence } from "@/lib/store";
+import { isUnread, markRead, useStore, useUser, usePresence } from "@/lib/store";
 import { openModal, openProfile, openUserMenu, toast, type ServerPage } from "@/lib/ui";
 import { useVoice } from "@/lib/voice";
-import type { Channel, Dm, Server, VoiceMember } from "@/lib/types";
+import type { Channel, Dm, NowPlaying, Server, VoiceMember } from "@/lib/types";
 import { AnimImg, Avatar, Popover, useAnchor } from "./bits";
 import { canModerate, dragProps, moveToChannel, useDropTarget } from "./user-menu";
+import { isMuted, toggleChannelMute, useSilence } from "./avisos";
+import { openContextMenu } from "./context-menu";
 
 /* ------------------------------------------------------------------ */
 /* início: amigos e conversas diretas                                  */
@@ -210,23 +212,38 @@ function Group({ title, onAdd, children }: { title: string; onAdd?: () => void; 
   );
 }
 
-function TextRow({ server, channel, active, unread }: { server: Server; channel: Channel; active: boolean; unread: boolean }) {
+function TextRow({ server, channel, active, unread: rawUnread }: { server: Server; channel: Channel; active: boolean; unread: boolean }) {
+  const muted = useSilence((s) => isMuted(s, server.id, channel.id));
+  const unread = rawUnread && !muted;
   return (
     <Link
       href={`/app/s/${server.id}/${channel.id}`}
+      onContextMenu={(e) =>
+        openContextMenu(
+          e,
+          [
+            { label: "Marcar como lida", onClick: () => markRead(channel.id, channel.last_message_id) },
+            { label: useSilence.getState().channels.includes(channel.id) ? "Tirar o silêncio do canal" : "Silenciar canal", onClick: () => toggleChannelMute(channel.id) },
+            { label: "Copiar link", onClick: () => void navigator.clipboard?.writeText(`${location.origin}/app/s/${server.id}/${channel.id}`).then(() => toast("Link copiado.")), sep: true },
+          ],
+          `#${channel.name}`,
+        )
+      }
       className={`relative flex h-9 items-center gap-2 rounded-[9px] px-2 text-[15px] ${
-        active ? "bg-cocoa-4 font-semibold text-oat" : unread ? "font-bold text-oat hover:bg-cocoa-3" : "text-oat/55 hover:bg-cocoa-3 hover:text-oat/90"
+        active ? "bg-cocoa-4 font-semibold text-oat" : unread ? "font-bold text-oat hover:bg-cocoa-3" : muted ? "text-oat/30 hover:bg-cocoa-3 hover:text-oat/60" : "text-oat/55 hover:bg-cocoa-3 hover:text-oat/90"
       }`}
     >
       {unread && <span className="absolute -left-2 top-1/2 h-2 w-1 -translate-y-1/2 rounded-r-full bg-oat" />}
       <Hash className="size-[17px] shrink-0 opacity-50" />
       <span className="truncate">{channel.name}</span>
+      {muted && <BellOff className="ml-auto size-3.5 shrink-0 opacity-60" aria-label="Silenciado" />}
     </Link>
   );
 }
 
 function VoiceRow({ server, channel, active }: { server: Server; channel: Channel; active: boolean }) {
   const members = useStore((s) => s.voice[channel.id]) ?? [];
+  const music = useStore((s) => s.music[channel.id]);
   const me = useStore((s) => s.me);
   const v = useVoice();
   const here = v.channelId === channel.id;
@@ -244,16 +261,46 @@ function VoiceRow({ server, channel, active }: { server: Server; channel: Channe
       >
         <Volume2 className={`size-[17px] shrink-0 ${here ? "text-moss" : "opacity-50"}`} />
         <span className="truncate">{channel.name}</span>
-        {members.length > 0 && <span className="ml-auto text-[11.5px] tabular-nums text-oat/40">{members.length}</span>}
+        {channel.user_limit ? (
+          <span
+            className={`ml-auto rounded-[5px] bg-cocoa-0 px-1 text-[11px] tabular-nums ${members.length >= channel.user_limit ? "text-rust" : "text-oat/45"}`}
+            title={`Até ${channel.user_limit} pessoas`}
+          >
+            {String(members.length).padStart(2, "0")}/{String(channel.user_limit).padStart(2, "0")}
+          </span>
+        ) : (
+          members.length > 0 && <span className="ml-auto text-[11.5px] tabular-nums text-oat/40">{members.length}</span>
+        )}
       </Link>
-      {members.length > 0 && (
+      {(members.length > 0 || music) && (
         <ul className="mb-1 ml-7 mt-0.5 space-y-px">
           {members.map((m) => (
             <VoiceMemberRow key={m.user_id} m={m} serverId={server.id} />
           ))}
+          {music && <DjRow music={music} />}
         </ul>
       )}
     </div>
+  );
+}
+
+/** O bot de música: aparece na call enquanto toca alguma coisa. */
+function DjRow({ music }: { music: NowPlaying }) {
+  return (
+    <li
+      className="flex h-8 items-center gap-2 rounded-[8px] px-1.5 text-[13.5px] text-oat/70"
+      title={`${music.playing ? "Tocando" : "Pausado"}: ${music.title}${music.author ? ` · ${music.author}` : ""} (pedido por ${music.owner_name})`}
+      aria-label={`DJ da call ${music.playing ? "tocando" : "pausado"}: ${music.title}`}
+    >
+      <span className={`grid size-[22px] shrink-0 place-items-center rounded-full bg-ember text-white ${music.playing ? "ring-2 ring-moss" : ""}`}>
+        <Music2 className="size-3" />
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-semibold text-oat/90">DJ</span> · {music.title}
+      </span>
+      {music.playing ? <span aria-hidden className="eq-bars shrink-0"><i /><i /><i /></span> : <Pause className="size-3.5 opacity-60" />}
+      <span className="shrink-0 rounded-[5px] bg-ember/80 px-1 text-[9.5px] font-bold uppercase tracking-wide text-white">bot</span>
+    </li>
   );
 }
 

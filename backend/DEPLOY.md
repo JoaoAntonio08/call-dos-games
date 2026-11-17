@@ -166,6 +166,14 @@ Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reco
 - **Cargos** (Configurações do servidor → Cargos): cada cargo libera permissões (pôr música, DJ, comandos, hype, apelidos, moderar call). "Todo mundo" vale para quem não tem cargo; dono e admins podem tudo. Em **Canais**, cada canal pode ficar visível só para alguns cargos, e só alguns podem escrever (texto) ou falar (voz; os outros só escutam).
 - **Música:** `/tocar nome ou link` põe na fila da call de quem pediu; `/fila` e `/pular` também. O comando e a resposta só aparecem para quem digitou e somem em 12 horas. Só quem pôs a música (ou DJ/admin) pausa e pula; os outros votam (mais da metade da call pula). Cada um tem o próprio volume.
 - **Bots sem código** (Configurações do servidor → Bots): o bot junta módulos (música, diversão, enquete, boas-vindas, respostas automáticas, filtro de palavras, lembretes e cargo automático), escolhendo canais e cargos. Lembretes usam o horário de Brasília.
+- **Bot de jogos** (módulo Jogos no criador de bots): `/jogo nome` procura o jogo na Steam (preço em reais, gêneros, lançamento, nota) e `/gratis` mostra os jogos que estão de graça na Steam agora. Se escolher um canal em "Avisar jogos grátis da Steam sozinho em", a API posta lá cada jogo grátis novo (confere a cada 30 minutos). Usa a loja da Steam e o GamerPower, **sem chave**.
+- **DJ da call:** quando a música toca, aparece um "DJ" na lista da sala de voz (todo mundo vê, mesmo quem está fora) e avisos de "tocando agora" e "entrou na fila". A música segue num mini player no canto quando a pessoa vai para um canal de texto, sem sair da call.
+
+### Salas, avisos e app de Windows
+
+- **Limite de pessoas** (Configurações do servidor → Canais, em cada sala de voz): 0 é sem limite. Sala cheia barra quem chega; quem pode moderar a call entra assim mesmo.
+- **Avisos:** DM e menção (`@nome`, `@todos`) tocam um som e mostram aviso (notificação do Windows se a janela estiver em segundo plano). Botão direito no canal ou no servidor: **Marcar como lida**, **Silenciar**. Cada um ajusta em **Configurações → Notificações**.
+- **App de Windows 1.4.0:** fechar no X deixa o app na bandeja (perto do relógio) com a call rolando; "Fechar de vez" e "Sair da call" ficam no menu da bandeja. Em **Configurações → App de Windows**: abrir junto com o Windows, abrir escondido e continuar rodando ao fechar.
 
 ### Uso de transmissão (tela e câmera)
 

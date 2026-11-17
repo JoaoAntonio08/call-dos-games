@@ -321,3 +321,14 @@ CREATE TABLE IF NOT EXISTS share_blocks (
     PRIMARY KEY (scope, user_id)
 );
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS share_limit JSONB NOT NULL DEFAULT '{}';
+
+-- jogos grátis da Steam que o bot de jogos já avisou em cada servidor
+CREATE TABLE IF NOT EXISTS free_games_seen (
+    server_id BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    giveaway  TEXT NOT NULL,
+    seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (server_id, giveaway)
+);
+
+-- limite de pessoas numa sala de voz (0 = sem limite)
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS user_limit INT NOT NULL DEFAULT 0;

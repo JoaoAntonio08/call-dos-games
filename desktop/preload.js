@@ -22,6 +22,13 @@ contextBridge.exposeInMainWorld("cdgDesktop", {
   },
   gameCandidates: () => ipcRenderer.invoke("cdg:game-candidates"),
   customGames: (list) => ipcRenderer.invoke("cdg:game-custom", list),
+  // abrir com o Windows, abrir escondido e continuar em segundo plano ao fechar
+  appPrefs: (patch) => ipcRenderer.invoke("cdg:app-prefs", patch),
+  onTray: (cb) => {
+    const f = (_e, what) => cb(what);
+    ipcRenderer.on("cdg:tray", f);
+    return () => ipcRenderer.removeListener("cdg:tray", f);
+  },
   onClip: (cb) => {
     const f = () => cb();
     ipcRenderer.on("cdg:clip", f);

@@ -1,11 +1,11 @@
 {
   "windows": {
-    "versao": "1.3.0",
-    "url": "https://github.com/JoaoAntonio08/call-dos-games/releases/download/v1.4.0/Call-dos-Games-Setup-1.3.0.exe"
+    "versao": "1.4.0",
+    "url": "https://github.com/JoaoAntonio08/call-dos-games/releases/download/v1.5.0/Call-dos-Games-Setup-1.4.0.exe"
   },
   "android": {
     "versao": "1.2.0",
     "url": "https://github.com/JoaoAntonio08/call-dos-games/releases/download/v1.2.0/Call-dos-Games-1.2.0.apk"
   },
-  "notas": "música com /tocar, cargos, bots sem código, apelidos e abrir conversa sem cair da call"
+  "notas": "fica na bandeja com a call rolando, abre com o Windows, DJ na call, bot de jogos e avisos de menção"
 }

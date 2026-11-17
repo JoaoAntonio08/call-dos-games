@@ -212,3 +212,62 @@ export function DesktopGameSettings() {
     </Section>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* App de Windows: abrir com o Windows e continuar em segundo plano     */
+/* ------------------------------------------------------------------ */
+
+type AppPrefs = { startup: boolean; hidden: boolean; background: boolean };
+type DesktopApp = { appPrefs?: (patch?: Partial<AppPrefs>) => Promise<AppPrefs> };
+const desktopApp = (): DesktopApp | undefined =>
+  typeof window === "undefined" ? undefined : (window as unknown as { cdgDesktop?: DesktopApp }).cdgDesktop;
+
+/** Só aparece dentro do app de Windows. */
+export function hasDesktopApp() {
+  return !!desktopApp();
+}
+
+export function DesktopAppSettings() {
+  const d = desktopApp();
+  const [p, setP] = useState<AppPrefs | null>(null);
+  useEffect(() => {
+    void d?.appPrefs?.().then(setP, () => {});
+  }, [d]);
+  if (!d) return null;
+  if (!d.appPrefs) {
+    return (
+      <Section title="App de Windows">
+        <p className="text-[13.5px] text-oat/55">Atualize o app de Windows para poder abrir junto com o Windows e deixar a call rodando em segundo plano.</p>
+      </Section>
+    );
+  }
+  if (!p) return null;
+  const save = async (patch: Partial<AppPrefs>) => {
+    setP({ ...p, ...patch });
+    try {
+      setP(await d.appPrefs!(patch));
+    } catch {
+      toast("Não deu para salvar essa opção do app.");
+    }
+  };
+  const row = (label: string, hint: string, key: keyof AppPrefs, disabled = false) => (
+    <label className={`flex items-center justify-between gap-4 py-2 ${disabled ? "opacity-45" : ""}`}>
+      <span>
+        <span className="block text-[14.5px] font-medium">{label}</span>
+        <span className="block text-[12.5px] text-oat/45">{hint}</span>
+      </span>
+      <Toggle checked={p[key]} onChange={(v) => void save({ [key]: v })} label={label} disabled={disabled} />
+    </label>
+  );
+  return (
+    <Section title="App de Windows">
+      {row("Abrir junto com o Windows", "O app liga sozinho quando você entra no computador.", "startup")}
+      {row("Abrir escondido", "Ao ligar com o Windows, fica só no ícone perto do relógio, sem abrir a janela.", "hidden", !p.startup)}
+      {row(
+        "Continuar rodando ao fechar",
+        "O X esconde a janela e a call continua (você segue ouvindo e falando). Para fechar de vez: botão direito no ícone perto do relógio → Fechar de vez.",
+        "background",
+      )}
+    </Section>
+  );
+}

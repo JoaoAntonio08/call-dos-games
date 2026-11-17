@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import os
 import httpx
+from fastapi import APIRouter
+from pydantic import BaseModel
 
-from ..core import new_id, pool, settings, sid
+from ..core import Auth, CurrentUser, fetch_user, new_id, parse_id, pool, settings, sid
 from ..perms import Member
 from ..realtime import hub
 from .extras import announce_queue, parse_youtube, youtube_info
@@ -43,6 +45,51 @@ async def youtube_search(q: str) -> tuple[str, str, str] | None:
         return vid, html.unescape(str(sn.get("title", "")))[:200], html.unescape(str(sn.get("channelTitle", "")))[:100]
     except Exception:
         return None
+
+
+router = APIRouter()
+_titles: dict[str, tuple[str, str]] = {}
+
+
+class NowPlayingIn(BaseModel):
+    channel_id: str
+    video_id: str | None = None
+    owner_id: str | None = None
+    playing: bool = True
+
+
+@router.post("/voice/music")
+async def now_playing(body: NowPlayingIn, me: Auth = CurrentUser) -> dict:
+    """O app de quem está controlando o vídeo avisa o que está tocando: o "DJ" aparece na call para todo mundo."""
+    cid = parse_id(body.channel_id)
+    if hub.user_voice.get(me.id) != cid:
+        return {"ok": False}
+    if not body.video_id:
+        await hub.set_music(cid, None)
+        return {"ok": True}
+    vid = body.video_id[:11]
+    cur = hub.music.get(cid)
+    if cur and cur["video_id"] == vid and cur["playing"] == body.playing:
+        return {"ok": True}
+    if vid not in _titles:
+        if len(_titles) > 2000:
+            _titles.clear()
+        _titles[vid] = await youtube_info(vid)
+    title, author = _titles[vid]
+    owner = parse_id(body.owner_id) if body.owner_id and body.owner_id.isdigit() else me.id
+    who = await fetch_user(owner)
+    await hub.set_music(
+        cid,
+        {
+            "video_id": vid,
+            "title": title or "Vídeo do YouTube",
+            "author": author,
+            "owner_id": sid(owner),
+            "owner_name": (who or {}).get("display_name") or "Alguém",
+            "playing": body.playing,
+        },
+    )
+    return {"ok": True}
 
 
 async def _call_of(ch: dict, user_id: int) -> int | None:
@@ -88,6 +135,13 @@ async def music_command(name: str, args: str, ch: dict, user_id: int, who: Membe
         items = await announce_queue(vc)
         pos = next((i + 1 for i, x in enumerate(items) if x["id"] == sid(item)), len(items))
         call = await pool().fetchval("SELECT name FROM channels WHERE id = $1", vc) or "call"
+        # todo mundo da call vê o pedido chegar
+        who = await fetch_user(user_id)
+        await hub.send(
+            list(hub.voice.get(vc, {}).keys()),
+            "music_added",
+            {"channel_id": sid(vc), "title": title or "Música", "by": (who or {}).get("display_name") or "Alguém", "position": pos, "user_id": sid(user_id)},
+        )
         return f"🎵 **{title or 'Música'}**{f' · {author}' if author else ''} entrou na fila de {call} (posição {pos}). Só você pausa ou pula ela."
     if name == "fila":
         if vc is None:

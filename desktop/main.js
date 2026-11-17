@@ -1,6 +1,6 @@
 // App de Windows do Call dos Games: uma janela própria que abre o site publicado.
 // Como o conteúdo vem do site, o app se atualiza sozinho sempre que o site é republicado.
-const { app, BrowserWindow, Menu, desktopCapturer, globalShortcut, ipcMain, net, session, shell, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, Tray, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, session, shell, clipboard } = require("electron");
 const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -15,15 +15,71 @@ app.setAppUserModelId("com.calldosgames.app"); // notificações do Windows com 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.focus();
-  });
+  app.on("second-instance", () => showWindow());
 }
 
 /** @type {BrowserWindow | null} */
 let win = null;
+/** @type {Tray | null} */
+let tray = null;
+// true quando a pessoa mandou fechar de vez (menu da bandeja, atualização, desligar o PC)
+let quitting = false;
+let warnedTray = false;
+
+/* ------------------------------------------------------------------ preferências do app */
+// startup: abrir junto com o Windows; hidden: nesse caso, abrir só na bandeja;
+// background: o X esconde a janela e a call continua (fecha de vez pela bandeja)
+const prefsFile = () => path.join(app.getPath("userData"), "app.json");
+function loadPrefs() {
+  const base = { startup: false, hidden: false, background: true };
+  try {
+    return { ...base, ...JSON.parse(fs.readFileSync(prefsFile(), "utf8")) };
+  } catch {
+    return base;
+  }
+}
+let prefs = { startup: false, hidden: false, background: true };
+function applyStartup() {
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!prefs.startup, args: ["--startup"] });
+  } catch {
+    /* sem permissão: fica como está */
+  }
+}
+const startedByWindows = process.argv.includes("--startup");
+
+function showWindow() {
+  if (!win || win.isDestroyed()) {
+    if (app.isReady()) createWindow(true);
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromPath(path.join(__dirname, "build", "icon-256.png")).resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip("Call dos Games");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Abrir o Call dos Games", click: () => showWindow() },
+      { label: "Sair da call", click: () => win?.webContents.send("cdg:tray", "leave") },
+      { type: "separator" },
+      {
+        label: "Fechar de vez",
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+  tray.on("click", () => showWindow());
+  tray.on("double-click", () => showWindow());
+}
 
 /* ------------------------------------------------------------------ tamanho e posição da janela */
 const stateFile = () => path.join(app.getPath("userData"), "janela.json");
@@ -53,7 +109,7 @@ const isApp = (url) => {
 };
 
 /* ------------------------------------------------------------------ janela principal */
-function createWindow() {
+function createWindow(forceShow = false) {
   const s = loadState();
   win = new BrowserWindow({
     x: s.x,
@@ -72,13 +128,37 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       spellcheck: true,
+      // com a janela escondida na bandeja a call precisa continuar a todo vapor
+      backgroundThrottling: false,
       // a versão do app vai para o site, que avisa quando tiver uma nova
       additionalArguments: [`--cdg-version=${app.getVersion()}`],
     },
   });
   if (s.maximized) win.maximize();
-  win.once("ready-to-show", () => win.show());
-  win.on("close", saveState);
+  // aberto pelo Windows com "abrir minimizado": fica só na bandeja até a pessoa clicar
+  const startHidden = !forceShow && startedByWindows && prefs.startup && prefs.hidden;
+  win.once("ready-to-show", () => {
+    if (!startHidden) win.show();
+  });
+  // desligando/reiniciando o PC: fecha de verdade
+  win.on("session-end", () => {
+    quitting = true;
+  });
+  win.on("close", (e) => {
+    saveState();
+    if (quitting || !prefs.background) return;
+    // o X só esconde: a call e as notificações continuam, e o app volta pelo ícone perto do relógio
+    e.preventDefault();
+    win.hide();
+    if (!warnedTray && tray) {
+      warnedTray = true;
+      try {
+        tray.displayBalloon({ title: "Call dos Games continua aberto", content: "A call segue rolando. Para fechar de vez, clique com o botão direito no ícone aqui e em “Fechar de vez”.", iconType: "info" });
+      } catch {
+        /* balão não suportado */
+      }
+    }
+  });
 
   // links: os do app ficam aqui, login do Google abre em janelinha, o resto vai para o navegador
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -226,6 +306,9 @@ app.whenReady().then(() => {
     }
   });
 
+  prefs = loadPrefs();
+  applyStartup();
+  createTray();
   createWindow();
 
   // Alt+Shift+C clipa o lance mesmo com o jogo na frente (o site decide se dá para clipar agora)
@@ -237,6 +320,24 @@ app.whenReady().then(() => {
 });
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("before-quit", () => {
+  quitting = true;
+});
+
+// preferências do app (aba "App de Windows" nas configurações do site)
+ipcMain.handle("cdg:app-prefs", (e, patch) => {
+  if (!isApp(e.senderFrame?.url || "")) throw new Error("origem");
+  if (patch && typeof patch === "object") {
+    for (const k of ["startup", "hidden", "background"]) if (typeof patch[k] === "boolean") prefs[k] = patch[k];
+    try {
+      fs.writeFileSync(prefsFile(), JSON.stringify(prefs));
+    } catch {
+      /* sem problema */
+    }
+    applyStartup();
+  }
+  return { ...prefs };
+});
 
 /* ------------------------------------------------------------------ jogo aberto no PC */
 // A cada 15 s olha a lista de programas abertos (só o nome) e avisa o site quando o jogo muda.

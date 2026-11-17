@@ -31,6 +31,7 @@ async def bootstrap(me: Auth = CurrentUser) -> dict:
         "friends": await friends_of(me.id),
         "read_states": {sid(r["channel_id"]): sid(r["last_read_id"]) for r in reads},
         "voice": hub.voice_snapshot(visible),
+        "music": hub.music_snapshot(visible),
         "livekit": bool(settings.livekit_url and settings.livekit_key and settings.livekit_secret),
         # franquia de GB só existe no LiveKit Cloud; no servidor próprio o aviso muda
         "livekit_cloud": "livekit.cloud" in settings.livekit_url,
@@ -49,6 +50,15 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
     ch = await can_access_channel(me.id, cid)
     if not ch or ch["type"] not in ("voice", "dm"):
         raise err(404, "Canal de voz não encontrado.")
+    # sala cheia: só entra quem já está nela ou quem pode mover gente (admin / moderar call)
+    limit = await pool().fetchval("SELECT user_limit FROM channels WHERE id = $1", cid) or 0
+    inside = hub.voice.get(cid, {})
+    if limit and me.id not in inside and len(inside) >= limit:
+        from ..perms import member as perms_member
+
+        who = await perms_member(ch["server_id"], me.id) if ch.get("server_id") else None
+        if not (who and who.can("moderar_voz")):
+            raise err(403, f"A sala está cheia ({len(inside)}/{limit}).")
     user = await fetch_user(me.id)
     assert user
     profile = user_out(user)

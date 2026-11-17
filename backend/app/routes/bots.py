@@ -34,6 +34,7 @@ MODULES: dict[str, dict[str, Any]] = {
     "musica": {"label": "Música", "commands": ["tocar", "fila", "pular"], "house": True},
     "diversao": {"label": "Diversão", "commands": ["dado", "moeda", "sortear", "escolher"], "house": True},
     "enquete": {"label": "Enquete", "commands": ["enquete"], "house": True},
+    "jogos": {"label": "Jogos", "commands": ["jogo", "gratis"], "house": True},
     "boas_vindas": {"label": "Boas-vindas", "commands": [], "house": False},
     "auto_resposta": {"label": "Respostas automáticas", "commands": [], "house": False},
     "filtro": {"label": "Filtro de palavras", "commands": [], "house": False},
@@ -42,7 +43,7 @@ MODULES: dict[str, dict[str, Any]] = {
 }
 COMMAND_MODULE = {c: k for k, m in MODULES.items() for c in m["commands"]}
 # apelidos que também valem
-ALIASES = {"play": "tocar", "p": "tocar", "skip": "pular", "queue": "fila", "poll": "enquete"}
+ALIASES = {"play": "tocar", "p": "tocar", "skip": "pular", "queue": "fila", "poll": "enquete", "game": "jogo", "steam": "jogo", "free": "gratis", "grátis": "gratis"}
 
 
 # ------------------------------------------------------------------ cache dos bots por servidor
@@ -113,9 +114,9 @@ async def clean_modules(server_id: int, raw: dict) -> dict:
         if key not in MODULES or not isinstance(cfg, dict):
             continue
         c: dict[str, Any] = {"enabled": bool(cfg.get("enabled"))}
-        if key in ("musica", "diversao", "enquete", "auto_resposta", "filtro"):
+        if key in ("musica", "diversao", "enquete", "jogos", "auto_resposta", "filtro"):
             c["channels"] = [x for x in _ids(cfg.get("channels")) if x in text_channels]
-        if key in ("musica", "diversao", "enquete"):
+        if key in ("musica", "diversao", "enquete", "jogos"):
             c["roles"] = [x for x in _ids(cfg.get("roles")) if x in roles]
         if key == "boas_vindas":
             ch = _ids([cfg.get("channel")]) if cfg.get("channel") else []
@@ -143,6 +144,10 @@ async def clean_modules(server_id: int, raw: dict) -> dict:
                     continue
                 items.append({"channel": ch[0], "time": hhmm, "days": days or list(range(7)), "text": _text(it.get("text"), 1000)})
             c["items"] = items
+        if key == "jogos":
+            # canal onde o bot avisa sozinho os jogos grátis novos da Steam (None = só pelo /gratis)
+            ch = _ids([cfg.get("aviso")]) if cfg.get("aviso") else []
+            c["aviso"] = ch[0] if ch and ch[0] in text_channels else None
         if key == "cargo_automatico":
             c["roles"] = [x for x in _ids(cfg.get("roles")) if x in roles]
         out[key] = c

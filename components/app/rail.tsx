@@ -5,6 +5,8 @@ import { Plus } from "lucide-react";
 import { isUnread, useStore } from "@/lib/store";
 import { openModal, useRoute } from "@/lib/ui";
 import { ServerIcon } from "./bits";
+import { markServerRead, toggleServerMute, useSilence } from "./avisos";
+import { openContextMenu } from "./context-menu";
 
 /** Coluna da esquerda: casa (amigos e conversas) e a "estante" de servidores. */
 export function ServerRail() {
@@ -12,6 +14,7 @@ export function ServerRail() {
   const order = useStore((s) => s.serverOrder);
   const servers = useStore((s) => s.servers);
   const reads = useStore((s) => s.reads);
+  const silence = useSilence();
   const dms = useStore((s) => s.dms);
   const pending = useStore((s) => s.friends.filter((f) => f.relation === "incoming").length);
   const voice = useStore((s) => s.voice);
@@ -33,10 +36,30 @@ export function ServerRail() {
         const s = servers[id];
         if (!s) return null;
         const active = route.kind === "server" && route.serverId === id;
-        const unread = s.channels.some((c) => c.type === "text" && isUnread(c.id, c.last_message_id, reads));
+        const muted = silence.servers.includes(id);
+        const unread = !muted && s.channels.some((c) => c.type === "text" && !silence.channels.includes(c.id) && isUnread(c.id, c.last_message_id, reads));
         const live = s.channels.some((c) => c.type === "voice" && (voice[c.id]?.length ?? 0) > 0);
         return (
-          <RailItem key={id} href={`/app/s/${id}`} active={active} label={s.name} dot={unread && !active} live={live}>
+          <RailItem
+            key={id}
+            href={`/app/s/${id}`}
+            active={active}
+            label={muted ? `${s.name} (silenciado)` : s.name}
+            dot={unread && !active}
+            live={live}
+            onContextMenu={(e) =>
+              openContextMenu(
+                e,
+                [
+                  { label: "Marcar como lida", onClick: () => markServerRead(id) },
+                  { label: muted ? "Tirar o silêncio do servidor" : "Silenciar servidor", onClick: () => toggleServerMute(id) },
+                  { label: "Convidar pessoas", onClick: () => openModal({ kind: "invite", serverId: id }), sep: true },
+                  { label: "Configurações do servidor", onClick: () => openModal({ kind: "server-settings", serverId: id }) },
+                ],
+                s.name,
+              )
+            }
+          >
             <ServerIcon name={s.name} icon={s.icon} accent={s.accent} size={48} className={`wobble transition-[border-radius] ${active ? "!rounded-[16px]" : ""}`} />
           </RailItem>
         );
@@ -62,6 +85,7 @@ function RailItem({
   badge,
   dot,
   live,
+  onContextMenu,
   children,
 }: {
   href: string;
@@ -70,10 +94,11 @@ function RailItem({
   badge?: number;
   dot?: boolean;
   live?: boolean;
+  onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
 }) {
   return (
-    <Link href={href} title={label} aria-label={label} aria-current={active ? "page" : undefined} className="group relative flex w-full justify-center">
+    <Link href={href} title={label} aria-label={label} aria-current={active ? "page" : undefined} onContextMenu={onContextMenu} className="group relative flex w-full justify-center">
       {/* marcador da esquerda: aba de fichário */}
       <span
         aria-hidden

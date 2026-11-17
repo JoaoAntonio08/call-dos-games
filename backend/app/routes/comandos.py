@@ -71,6 +71,8 @@ MODULE_HELP: dict[str, str] = {
     "fila": "Mostra a fila de músicas da sua call",
     "pular": "Pula a música (a sua) ou vota para pular",
     "enquete": "Enquete: /enquete pergunta | opção 1 | opção 2",
+    "jogo": "Procura um jogo na Steam: /jogo nome",
+    "gratis": "Jogos grátis para resgatar na Steam agora",
 }
 
 
@@ -285,6 +287,10 @@ async def run_command(ch: dict, user_id: int, content: str, message_id: str) -> 
                 return
             if COMMAND_MODULE[name] == "musica":
                 text = await music_command(name, args, ch, user_id, who)
+            elif COMMAND_MODULE[name] == "jogos":
+                from .jogos import free_games_text, game_search
+
+                text = await game_search(args) if name == "jogo" else await free_games_text()
             elif name == "enquete":
                 parts = [p.strip()[:120] for p in args.split("|") if p.strip()]
                 if len(parts) < 3:

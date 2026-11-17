@@ -24,6 +24,8 @@ type ModuleCfg = {
   words?: string[];
   warning?: string;
   items?: Reminder[];
+  /** jogos: canal onde o bot avisa sozinho os jogos grátis novos da Steam */
+  aviso?: string | null;
 };
 type Modules = Record<string, ModuleCfg>;
 interface ServerBot {
@@ -37,6 +39,7 @@ const CATALOG: { key: string; emoji: string; label: string; what: string }[] = [
   { key: "musica", emoji: "🎵", label: "Música", what: "/tocar nome ou link, /fila e /pular. Toca na call de quem pediu; só quem pôs (ou DJ) pausa e pula." },
   { key: "diversao", emoji: "🎲", label: "Diversão", what: "/dado, /moeda, /sortear e /escolher." },
   { key: "enquete", emoji: "📊", label: "Enquete", what: "/enquete pergunta | opção 1 | opção 2 e a turma vota reagindo." },
+  { key: "jogos", emoji: "🎮", label: "Jogos", what: "/jogo nome procura o jogo na Steam (preço, desconto, gênero) e /gratis mostra os jogos grátis para resgatar. Pode avisar sozinho quando sair jogo grátis." },
   { key: "boas_vindas", emoji: "👋", label: "Boas-vindas", what: "Manda um recado quando alguém entra no servidor." },
   { key: "auto_resposta", emoji: "💬", label: "Respostas automáticas", what: "Quando alguém escreve uma palavra ou frase, o bot responde." },
   { key: "filtro", emoji: "🚫", label: "Filtro de palavras", what: "Apaga mensagens com palavras proibidas e avisa só quem mandou." },
@@ -105,7 +108,7 @@ export function BotBuilder({ server }: { server: Server }) {
     <div className="max-w-2xl">
       <h2 className="mb-2 pr-10 font-display text-[30px] leading-tight">Bots</h2>
       <p className="mb-6 text-[14px] leading-relaxed text-oat/60">
-        Monte um bot sem programar: escolha o que ele faz, em quais canais e para quais cargos. Sem bot nenhum, música, diversão e enquete já funcionam para
+        Monte um bot sem programar: escolha o que ele faz, em quais canais e para quais cargos. Sem bot nenhum, música, diversão, enquete e jogos já funcionam para
         todos com o bot da casa.
       </p>
       <FormError>{error}</FormError>
@@ -241,17 +244,34 @@ function BotEditor({
                 </span>
                 <Toggle checked={on} onChange={(v) => setMod(c.key, { enabled: v })} label={`${c.label}: ${on ? "ligado" : "desligado"}`} />
               </div>
-              {cfg && !on && ["musica", "diversao", "enquete"].includes(c.key) && (
+              {cfg && !on && ["musica", "diversao", "enquete", "jogos"].includes(c.key) && (
                 <p className="px-3 pb-3 text-[12px] text-oat/40">Desligado aqui: os comandos de {c.label.toLowerCase()} ficam desligados no servidor todo.</p>
               )}
               {on && cfg && (
                 <div className="space-y-3 border-t border-oat/[0.06] p-3">
-                  {["musica", "diversao", "enquete", "auto_resposta", "filtro"].includes(c.key) && channelPicker(c.key, cfg)}
-                  {["musica", "diversao", "enquete"].includes(c.key) && (
+                  {["musica", "diversao", "enquete", "jogos", "auto_resposta", "filtro"].includes(c.key) && channelPicker(c.key, cfg)}
+                  {["musica", "diversao", "enquete", "jogos"].includes(c.key) && (
                     <div>
                       <p className="mb-1.5 text-[12px] font-semibold text-oat/55">Quem pode usar</p>
                       <RolePicker roles={roles} value={cfg.roles ?? []} onChange={(v) => setMod(c.key, { roles: v })} empty="Todo mundo" />
                     </div>
+                  )}
+                  {c.key === "jogos" && (
+                    <Field label="Avisar jogos grátis da Steam sozinho em">
+                      <select
+                        value={cfg.aviso ?? ""}
+                        onChange={(e) => setMod(c.key, { aviso: e.target.value || null })}
+                        className="h-9 w-full rounded-[8px] bg-cocoa-0 px-2 text-[13.5px] outline-none"
+                        aria-label="Canal dos avisos de jogos grátis"
+                      >
+                        <option value="">Não avisar (só pelo /gratis)</option>
+                        {text.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            #{t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
                   )}
                   {c.key === "boas_vindas" && (
                     <>

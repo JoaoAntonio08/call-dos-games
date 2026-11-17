@@ -55,6 +55,8 @@ export interface Channel {
   view_roles?: string[];
   /** cargos que escrevem (texto) ou falam (voz) no canal (vazio = todo mundo) */
   send_roles?: string[];
+  /** sala de voz: máximo de pessoas (0 = sem limite) */
+  user_limit?: number;
 }
 
 export type Perm = "musica" | "dj" | "comandos" | "hype" | "apelidos" | "moderar_voz" | "uso";
@@ -163,6 +165,16 @@ export interface Message {
   nonce?: string;
 }
 
+/** O que o "DJ" está tocando numa call (aparece como mais um na call). */
+export interface NowPlaying {
+  video_id: string;
+  title: string;
+  author: string;
+  owner_id: string;
+  owner_name: string;
+  playing: boolean;
+}
+
 export interface VoiceMember {
   user_id: string;
   mic: boolean;
@@ -223,6 +235,7 @@ export interface Bootstrap {
   friends: Friend[];
   read_states: Record<string, string>;
   voice: Record<string, VoiceMember[]>;
+  music?: Record<string, NowPlaying>;
   livekit: boolean;
   livekit_cloud: boolean;
 }

@@ -36,7 +36,7 @@ import { durationOf } from "@/lib/format";
 import type { Channel, Server, Sound } from "@/lib/types";
 import { TrackVideo, useTicker } from "@/components/room/media";
 import { ScreenStage } from "@/components/room/screen-stage";
-import { YouTubeStage } from "@/components/room/youtube-stage";
+import { useCallViewMounted, YtSlot } from "./music-player";
 import { DevicesPanel, SharePanel } from "@/components/room/panels";
 import { Avatar } from "./bits";
 import { QueuePanel } from "./queue-panel";
@@ -186,6 +186,7 @@ const FRESH_SPIN_MS = 12_000;
 
 /** strip: a turma fica numa faixa embaixo do palco (quando o chat da call ocupa a lateral). */
 export function CallStage({ server, compact, strip }: { server?: Server; compact?: boolean; strip?: boolean }) {
+  useCallViewMounted();
   const v = useVoice();
   const { call, yt } = v;
   const livekitCloud = useStore((s) => s.livekitCloud);
@@ -264,6 +265,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
   const n = call.peers.length;
   const cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;
   const rows = Math.ceil(n / cols);
+  const solo = n === 1 && !compact;
   const toggle = (d: Dock) => setDock((cur) => (cur === d ? null : d));
 
   return (
@@ -289,11 +291,8 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
           <>
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1 overflow-hidden rounded-[16px] bg-cocoa-0">
-                {yt.state && (
-                  <div className={stage === "yt" ? "absolute inset-0" : "hidden"}>
-                    <YouTubeStage yt={yt} />
-                  </div>
-                )}
+                {/* o player de verdade fica fixo na página (music-player.tsx) e se encaixa aqui */}
+                {stage === "yt" && <YtSlot className="absolute inset-0" />}
                 {stagePeer && (
                   <div className="absolute inset-0">
                     <ScreenStage peer={stagePeer} volume={v.screenVol[stagePeer.identity] ?? 1} onVolume={(x) => v.setScreenVol(stagePeer.identity, x)} />
@@ -318,20 +317,27 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
             </aside>
           </>
         ) : (
-          <div className="grid min-h-0 flex-1 place-items-center">
-            <div className="grid w-full gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, maxWidth: `min(100%, calc((100svh - 220px) / ${rows} * 16 / 9 * ${cols}))` }}>
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto">
+            <div
+              className="grid w-full gap-3"
+              style={{
+                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                // sozinho: o quadro fica menor para o "chamar a turma" caber acima dos botões da call
+                maxWidth: solo ? "min(100%, 760px, calc((100svh - 330px) * 16 / 9))" : `min(100%, calc((100svh - 220px) / ${rows} * 16 / 9 * ${cols}))`,
+              }}
+            >
               {call.peers.map((p) => (
                 <Tile key={p.identity} peer={p} serverId={server?.id} />
               ))}
             </div>
-            {n === 1 && !compact && (
-              <div className="mt-6 flex max-w-sm flex-col items-center gap-3 text-center text-[14px] text-oat/45">
+            {solo && (
+              <div className="mt-4 flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center text-[14px] text-oat/45">
                 <p>Só você por enquanto.</p>
                 {server && v.channelId && (
                   <>
                     <HypeButton channelId={v.channelId} />
                     <button type="button" onClick={() => openModal({ kind: "invite", serverId: server.id })} className="text-[13px] font-semibold text-ember-2 hover:underline">
-                      Convidar alguém novo para o servidor
+                      Convidar alguém novo
                     </button>
                   </>
                 )}

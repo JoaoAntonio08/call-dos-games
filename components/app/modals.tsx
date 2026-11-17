@@ -13,9 +13,10 @@ import { BadgeRow } from "./badges";
 import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
 import { keyName } from "./user-bar";
 import { BotsTab, SteamSettings } from "./integracoes";
-import { DesktopGameSettings } from "./jogo-app";
+import { DesktopAppSettings, DesktopGameSettings, hasDesktopApp } from "./jogo-app";
 import { ChannelAccess, MemberRoles, RolesTab } from "./cargos";
 import { BotBuilder } from "./bot-builder";
+import { NotificationsTab } from "./avisos";
 import { PlatformTab, UsageTab } from "./uso";
 import { Room } from "livekit-client";
 
@@ -350,7 +351,9 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         ["perfil", "Perfil"],
         ["voz", "Voz e vídeo"],
         ["jogos", "Jogos"],
+        ["avisos", "Notificações"],
         ["conta", "Conta"],
+        ...(hasDesktopApp() ? ([["app", "App de Windows"]] as [string, string][]) : []),
         ...(platform ? ([["plataforma", "Plataforma"]] as [string, string][]) : []),
       ]}
       footer={
@@ -376,6 +379,13 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         </div>
       )}
       {tab === "conta" && <AccountTab />}
+      {tab === "avisos" && <NotificationsTab />}
+      {tab === "app" && (
+        <div className="max-w-xl">
+          <H>App de Windows</H>
+          <DesktopAppSettings />
+        </div>
+      )}
       {tab === "plataforma" && platform && <PlatformTab />}
     </SettingsFrame>
   );
@@ -1209,16 +1219,16 @@ function ChannelsTab({ server }: { server: Server }) {
       <H>Canais</H>
       <div className="space-y-2">
         {server.channels.map((c) => (
-          <ChannelRow key={c.id} server={server} id={c.id} name={c.name} topic={c.topic} type={c.type} />
+          <ChannelRow key={c.id} server={server} id={c.id} name={c.name} topic={c.topic} type={c.type} limit={c.user_limit ?? 0} />
         ))}
       </div>
     </div>
   );
 }
 
-function ChannelRow({ server, id, name, topic, type }: { server: Server; id: string; name: string; topic: string; type: "text" | "voice" }) {
-  const [f, setF] = useState({ name, topic });
-  const dirty = f.name !== name || f.topic !== topic;
+function ChannelRow({ server, id, name, topic, type, limit }: { server: Server; id: string; name: string; topic: string; type: "text" | "voice"; limit: number }) {
+  const [f, setF] = useState({ name, topic, user_limit: limit });
+  const dirty = f.name !== name || f.topic !== topic || f.user_limit !== limit;
   return (
     <div className="rounded-[12px] bg-cocoa-3 p-3">
       <div className="flex items-center gap-2">
@@ -1237,6 +1247,21 @@ function ChannelRow({ server, id, name, topic, type }: { server: Server; id: str
         </button>
       </div>
       {type === "text" && <input className="field mt-2 h-9 !py-0 text-[13.5px]" value={f.topic} placeholder="Tópico do canal" onChange={(e) => setF({ ...f, topic: e.target.value })} />}
+      {type === "voice" && (
+        <label className="mt-2 flex items-center gap-2 text-[13px] text-oat/60">
+          Limite de pessoas
+          <input
+            type="number"
+            min={0}
+            max={99}
+            className="field h-8 !w-16 !py-0 text-center text-[13.5px]"
+            value={f.user_limit}
+            onChange={(e) => setF({ ...f, user_limit: Math.max(0, Math.min(99, Number(e.target.value) || 0)) })}
+            aria-label={`Limite de pessoas em ${name}`}
+          />
+          <span className="text-[12px] text-oat/40">0 = sem limite. Admins e quem modera a call entram mesmo cheia.</span>
+        </label>
+      )}
       {dirty && (
         <button type="button" onClick={() => void api(`/channels/${id}`, { method: "PATCH", json: f }).catch((e) => toast(errorText(e)))} className="btn-ember mt-2 h-8 px-3 text-[13px]">
           Salvar
@@ -1259,7 +1284,10 @@ function MembersTab({ server, owner }: { server: Server; owner: boolean }) {
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold">{m.user.display_name}</span>
               <span className="text-[12.5px] text-oat/45">@{m.user.username}</span>
-              {m.role === "member" && <MemberRoles server={server} member={m} />}
+              <MemberRoles server={server} member={m} />
+              {m.role !== "member" && (m.roles?.length ?? 0) > 0 && (
+                <span className="mt-1 block text-[11.5px] text-oat/40">{m.role === "owner" ? "Dono" : "Admin"}: pode tudo, então os limites dos cargos não valem para ele.</span>
+              )}
             </span>
             {m.role === "owner" ? (
               <span className="text-[13px] text-honey">Dono</span>

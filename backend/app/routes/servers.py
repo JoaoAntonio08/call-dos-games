@@ -54,6 +54,7 @@ def channel_out(r: Any) -> dict:
         "last_message_id": sid(r["last_message_id"]),
         "view_roles": [sid(x) for x in (r["view_roles"] or [])],
         "send_roles": [sid(x) for x in (r["send_roles"] or [])],
+        "user_limit": r.get("user_limit") or 0,
     }
 
 
@@ -483,6 +484,7 @@ class ChannelPatch(BaseModel):
     position: int | None = None
     view_roles: list[str] | None = None
     send_roles: list[str] | None = None
+    user_limit: int | None = None
 
 
 
@@ -503,6 +505,8 @@ async def update_channel(channel_id: str, body: ChannelPatch, me: Auth = Current
         await pool().execute("UPDATE channels SET view_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.view_roles), cid)
     if body.send_roles is not None:
         await pool().execute("UPDATE channels SET send_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.send_roles), cid)
+    if body.user_limit is not None and ch["type"] == "voice":
+        await pool().execute("UPDATE channels SET user_limit = $1 WHERE id = $2", max(0, min(99, body.user_limit)), cid)
     await announce_server(ch["server_id"])
     return channel_out(await pool().fetchrow("SELECT * FROM channels WHERE id = $1", cid))
 

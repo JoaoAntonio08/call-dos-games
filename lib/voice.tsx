@@ -8,7 +8,7 @@ import { useCall, type Call, type PeerMeta } from "./use-call";
 import { useYouTubeSync } from "./use-youtube-sync";
 import { useClipper } from "./clipper";
 import { toast } from "./ui";
-import type { Attachment, QueueItem, Sound } from "./types";
+import type { Attachment, NowPlaying, QueueItem, Sound } from "./types";
 import { TrackAudio } from "@/components/room/media";
 
 /* ------------------------------------------------------------------ */
@@ -634,6 +634,49 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     if (ids[0] === room.localParticipant.identity) void playQueued(queue[0]);
   }, [queue, ytState, ytPlayer, room, playQueued]);
 
+  /* ---------------- o "DJ": a música aparece como mais um na call ---------------- */
+  // quem fez a última ação no vídeo avisa o servidor; aí todo mundo do servidor vê o DJ na call
+  const lastMusic = useRef("");
+  useEffect(() => {
+    if (!channelId || !room) return;
+    const s = ytState;
+    const key = s ? `${s.videoId}:${s.playing}` : "";
+    if (key === lastMusic.current) return;
+    const had = lastMusic.current;
+    lastMusic.current = key;
+    if (s && s.by !== room.localParticipant.identity) return;
+    if (!s && !had) return;
+    void api("/voice/music", {
+      method: "POST",
+      json: s ? { channel_id: channelId, video_id: s.videoId, owner_id: s.owner ?? s.by, playing: s.playing } : { channel_id: channelId, video_id: null },
+    }).catch(() => {});
+  }, [ytState, channelId, room]);
+
+  // avisos: música nova tocando e pedidos chegando na fila
+  const nowVideo = useRef<string | null>(null);
+  useEffect(() => {
+    nowVideo.current = channelId ? (useStore.getState().music[channelId]?.video_id ?? null) : null;
+    const onState = (e: Event) => {
+      const d = (e as CustomEvent<{ channel_id: string; music: NowPlaying | null }>).detail;
+      if (d.channel_id !== channelId) return;
+      const vid = d.music?.video_id ?? null;
+      if (vid && vid !== nowVideo.current && d.music) toast(`🎵 Tocando agora: ${d.music.title} · pedido por ${d.music.owner_name}`);
+      nowVideo.current = vid;
+    };
+    const onAdded = (e: Event) => {
+      const d = (e as CustomEvent<{ channel_id: string; title: string; by: string; position: number; user_id: string }>).detail;
+      // nada tocando: a música já começa e o aviso de "tocando agora" basta
+      if (d.channel_id !== channelId || !useStore.getState().music[d.channel_id]) return;
+      toast(d.user_id === me?.id ? `🎵 “${d.title}” entrou na fila (posição ${d.position}).` : `🎵 ${d.by} pôs “${d.title}” na fila.`);
+    };
+    window.addEventListener("cdg:music-state", onState);
+    window.addEventListener("cdg:music-added", onAdded);
+    return () => {
+      window.removeEventListener("cdg:music-state", onState);
+      window.removeEventListener("cdg:music-added", onAdded);
+    };
+  }, [channelId, me?.id]);
+
   /* ---------------- clipar momento ---------------- */
   const sharer = call.peers.find((p) => !p.isLocal && p.screen) ?? call.peers.find((p) => p.screen);
   // sem live: dá para gravar a própria tela só para clipes (fica no seu PC, ninguém recebe)
@@ -737,6 +780,14 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const desk = (window as unknown as { cdgDesktop?: { onClip?: (cb: () => void) => () => void } }).cdgDesktop;
     return desk?.onClip?.(() => clipNow.current?.());
+  }, []);
+
+  // "Sair da call" no menu do ícone perto do relógio (app de Windows)
+  useEffect(() => {
+    const desk = (window as unknown as { cdgDesktop?: { onTray?: (cb: (what: string) => void) => () => void } }).cdgDesktop;
+    return desk?.onTray?.((what) => {
+      if (what === "leave") void leaveRef.current();
+    });
   }, []);
 
   // sair da call ao fazer logout

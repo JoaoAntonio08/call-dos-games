@@ -1,5 +1,8 @@
 "use client";
 
+import { PersistentPlayer } from "./music-player";
+import { MessageAlerts } from "./avisos";
+import { ContextMenuHost } from "./context-menu";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
@@ -140,6 +143,9 @@ export function Shell() {
       <ProfilePopover />
       <UserMenu />
       <HypeAlert />
+      <PersistentPlayer />
+      <MessageAlerts />
+      <ContextMenuHost />
       <GameReporter />
       <Modals />
       {toastMsg && (
