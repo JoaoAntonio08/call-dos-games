@@ -191,6 +191,22 @@ Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reco
 
 Para enviar mensagens pelo webhook, use o endereço sem segredo e mande o token no cabeçalho `Authorization: Bearer ...` ou `X-Webhook-Token`. O token aparece somente na criação. Integrações antigas com token no caminho da URL devem ser recriadas ao adotar esta versão.
 
+### Ponte com o Discord (opcional)
+
+Espelha um canal de texto daqui com um canal do Discord, nos dois sentidos: o que a turma escreve lá aparece aqui com nome, foto, imagens e GIFs (selo **Discord**), e o que vocês escrevem aqui aparece lá com o nome e a foto de quem mandou.
+
+1. Em <https://discord.com/developers/applications>, **New Application** (ex.: "Call dos Games"). Na aba **Bot**: ligue **Message Content Intent** e deixe **Public Bot** desligado. Clique em **Reset Token** e copie o token (ele só aparece uma vez).
+2. No servidor, coloque o token no `backend/.env` (`DISCORD_BOT_TOKEN=...`) e reinicie a API (o `atualizar.sh` já reinicia). Não precisa abrir porta: o bot só faz conexões de saída para o Discord.
+3. No site, **Configurações do servidor → Ponte com o Discord** mostra "Bot … conectado" e o botão **Pôr o bot no seu Discord** (convite já com as permissões certas: ver canais, mandar mensagens, links, arquivos, histórico e **Gerenciar webhooks**).
+4. Clique em **Ligar ao Discord** no canal daqui. Aparece um comando tipo `!ponte ABCD-1234` (vale 10 minutos). Alguém que administra o servidor do Discord (dono, Administrador, Gerenciar servidor ou Gerenciar canais) digita isso no canal de lá. A tela atualiza sozinha.
+5. Para desligar: o botão **Desligar** aqui, ou `!ponte desligar` no canal do Discord.
+
+Detalhes: o bot cria um webhook "Call dos Games" no canal do Discord para mandar as mensagens daqui (se alguém apagar o webhook, a ponte desliga e avisa). Ninguém é marcado com @everyone de nenhum lado. Imagens que vêm do Discord são guardadas aqui (até 10 MB cada) e contam na cota de quem ligou a ponte. Edições e exclusões não são copiadas. O token nunca vai para o site nem para o git. `DISCORD_API_BASE` existe só para testes com um Discord de mentira; em produção deixe sem definir.
+
+### Noite da turma
+
+Página nova em cada servidor (ao lado do Hall da Fama). Admins marcam a noite (ex.: toda sexta 21h), escolhem a sala de voz, o canal dos avisos, o que vai rolar (vídeo ou música do YouTube começam sozinhos quando a turma entra pelo aviso) e o lembrete. Todo mundo responde Vou/Talvez/Não vou, recebe o lembrete antes e o aviso de "começou" na hora (quem respondeu "não vou" não é incomodado). Durante a noite a API conta quanto tempo cada um ficou na call; no fim manda o resumo no canal e a presença vai para o **Hall da presença**. Não precisa configurar nada. `NOITES_TICK` e `NOITES_MIN_PRESENCE` existem só para testes rápidos.
+
 ## 12. Backup
 
 ```bash

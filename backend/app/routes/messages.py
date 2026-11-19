@@ -22,7 +22,7 @@ EPHEMERAL_TTL = timedelta(hours=12)
 
 
 SELECT_MESSAGES = """
-    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name, m.visible_to, m.expires_at,
+    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name, m.author_avatar, m.author_ext, m.visible_to, m.expires_at,
            u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name, u.bio AS u_bio,
            u.accent AS u_accent, u.status AS u_status, u.custom_status AS u_custom_status, u.pronouns AS u_pronouns,
            u.created_at AS u_created_at, u.avatar_id AS u_avatar_id, av.animated AS u_avatar_animated,
@@ -69,7 +69,7 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
     for r in rows:
         author = None
         if r["webhook_id"] is not None:
-            author = bot_author(r["webhook_id"], r["author_name"], r["created_at"])
+            author = bot_author(r["webhook_id"], r["author_name"], r["created_at"], avatar=r["author_avatar"], ext=r["author_ext"])
         elif r["u_id"] is not None:
             u = {k[2:]: v for k, v in dict(r).items() if k.startswith("u_")}
             author = user_out(u, presence=hub.presence(u["id"], u["status"]))
@@ -98,13 +98,19 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
     return out
 
 
-def bot_author(webhook_id: int, name: str, created_at: Any) -> dict:
-    """Autor de mensagem de webhook: parece um usuário, com a marca de bot."""
-    return {
-        "id": sid(webhook_id), "username": "bot", "display_name": name or "Bot", "bio": "", "accent": "#5865f2",
+def bot_author(webhook_id: int, name: str, created_at: Any, *, avatar: str = "", ext: str = "") -> dict:
+    """Autor de mensagem de webhook: parece um usuário, com a marca de bot.
+    Quem chega pela ponte do Discord tem id próprio (para não juntar pessoas diferentes) e a foto de lá."""
+    out = {
+        "id": f"dc{ext}" if ext else sid(webhook_id), "username": "bot", "display_name": name or "Bot", "bio": "", "accent": "#5865f2",
         "pronouns": "", "custom_status": "", "status": "online", "avatar": None, "banner": None, "join_sound": None,
         "name_color": "", "theme": [], "badges": [], "created_at": created_at.isoformat(), "bot": True,
     }
+    if avatar:
+        out["avatar"] = {"url": avatar, "still": avatar, "animated": False}
+    if ext:
+        out["via"] = "discord"
+    return out
 
 
 async def emit(channel_id: int, visible_to: int | None, event: str, data: Any) -> None:
@@ -115,13 +121,16 @@ async def emit(channel_id: int, visible_to: int | None, event: str, data: Any) -
         await hub.to_channel(channel_id, event, data)
 
 
-async def post_webhook_message(channel_id: int, webhook_id: int, name: str, content: str, *, visible_to: int | None = None) -> dict:
+async def post_webhook_message(
+    channel_id: int, webhook_id: int, name: str, content: str, *, visible_to: int | None = None,
+    avatar: str = "", ext: str = "", attachments: list | None = None,
+) -> dict:
     mid = new_id()
     expires = datetime.now(timezone.utc) + EPHEMERAL_TTL if visible_to is not None else None
     await pool().execute(
-        """INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name, visible_to, expires_at)
-           VALUES ($1,$2,NULL,$3,'default',$4,$5,$6,$7)""",
-        mid, channel_id, content, webhook_id, name, visible_to, expires,
+        """INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name, visible_to, expires_at, author_avatar, author_ext, attachments)
+           VALUES ($1,$2,NULL,$3,'default',$4,$5,$6,$7,$8,$9,$10)""",
+        mid, channel_id, content, webhook_id, name, visible_to, expires, avatar, ext, json.dumps(attachments or []),
     )
     if visible_to is None:
         await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)
@@ -259,6 +268,10 @@ async def create_message(channel_id: str, body: MessageIn, me: Auth = CurrentUse
         _spawn(run_command(ch, me.id, content, msg["id"]))
     elif ch["type"] == "text" and ch.get("server_id") is not None and content:
         _spawn(on_message(ch, me.id, content, int(msg["id"])))
+    if not private and ch["type"] == "text":
+        from .discord import on_app_message  # ponte: manda para o canal ligado do Discord
+
+        on_app_message(cid, msg)
     return msg
 
 

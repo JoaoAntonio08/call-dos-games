@@ -26,6 +26,8 @@ export interface User {
   badges: string[];
   /** mensagem de webhook (bot) */
   bot?: boolean;
+  /** veio pela ponte com o Discord */
+  via?: "discord";
 }
 
 export interface Me extends User {

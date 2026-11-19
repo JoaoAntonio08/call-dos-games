@@ -416,7 +416,14 @@ const MessageItem = memo(function MessageItem({
               >
                 {name}
               </button>
-              {author?.bot && <span className="shrink-0 self-center rounded-[5px] bg-ember px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white">Bot</span>}
+              {author?.bot &&
+                (author.via === "discord" ? (
+                  <span className="shrink-0 self-center rounded-[5px] bg-[#5865f2] px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white" title="Mandou pelo Discord">
+                    Discord
+                  </span>
+                ) : (
+                  <span className="shrink-0 self-center rounded-[5px] bg-ember px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white">Bot</span>
+                ))}
               <span className="shrink-0 text-[11.5px] text-oat/35">{stampOf(msg.created_at)}</span>
             </p>
           )}

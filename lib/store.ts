@@ -530,6 +530,9 @@ function handleEvent(t: string, d: any) {
     case "voice_move":
     case "voice_kick":
     case "hype":
+    case "event_reminder":
+    case "event_start":
+    case "events_changed":
     case "music_skip":
     case "music_added":
     case "share_block":

@@ -335,3 +335,56 @@ CREATE TABLE IF NOT EXISTS free_games_seen (
 
 -- limite de pessoas numa sala de voz (0 = sem limite)
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS user_limit INT NOT NULL DEFAULT 0;
+
+-- ponte com o Discord: um canal de texto daqui espelhado com um canal do Discord
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_avatar TEXT NOT NULL DEFAULT '';
+-- quem escreveu do lado de fora (id do Discord): separa as pessoas que chegam pela ponte
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_ext TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS discord_links (
+    channel_id         BIGINT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+    discord_channel_id TEXT NOT NULL UNIQUE,
+    discord_guild_id   TEXT NOT NULL,
+    discord_name       TEXT NOT NULL DEFAULT '',
+    guild_name         TEXT NOT NULL DEFAULT '',
+    webhook_id         TEXT NOT NULL,
+    webhook_token      TEXT NOT NULL,
+    created_by         BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Noite da turma: evento marcado (ex.: sexta 21h), com lembrete, call pronta e presença registrada
+CREATE TABLE IF NOT EXISTS server_events (
+    id               BIGINT PRIMARY KEY,
+    server_id        BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    title            TEXT NOT NULL,
+    description      TEXT NOT NULL DEFAULT '',
+    starts_at        TIMESTAMPTZ NOT NULL,
+    duration_min     INT NOT NULL DEFAULT 180,
+    weekly           BOOLEAN NOT NULL DEFAULT false,
+    voice_channel_id BIGINT REFERENCES channels(id) ON DELETE SET NULL,
+    text_channel_id  BIGINT REFERENCES channels(id) ON DELETE SET NULL,
+    activity         TEXT NOT NULL DEFAULT '',
+    media_url        TEXT NOT NULL DEFAULT '',
+    remind_min       INT NOT NULL DEFAULT 30,
+    reminded_for     TIMESTAMPTZ,
+    started_for      TIMESTAMPTZ,
+    created_by       BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS server_events_server ON server_events (server_id, starts_at);
+CREATE TABLE IF NOT EXISTS event_rsvps (
+    event_id BIGINT NOT NULL REFERENCES server_events(id) ON DELETE CASCADE,
+    user_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status   TEXT NOT NULL,
+    PRIMARY KEY (event_id, user_id)
+);
+-- presença de cada noite (fica mesmo se o evento for apagado)
+CREATE TABLE IF NOT EXISTS event_attendance (
+    server_id BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    night     TIMESTAMPTZ NOT NULL,
+    user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_id  BIGINT NOT NULL,
+    title     TEXT NOT NULL DEFAULT '',
+    seconds   INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, night, user_id)
+);

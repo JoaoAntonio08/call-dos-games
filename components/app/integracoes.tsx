@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Check, Copy, Gamepad2, Trash2 } from "lucide-react";
+import { Bot, Check, Copy, ExternalLink, Gamepad2, Link2, Trash2, Unlink } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { toast } from "@/lib/ui";
@@ -317,6 +317,180 @@ export function BotsTab({ server }: { server: Server }) {
         ))}
         {hooks.length === 0 && <p className="text-[13px] text-oat/45">Nenhum webhook neste canal ainda.</p>}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Ponte com o Discord: um canal daqui espelhado com um canal de lá    */
+/* ------------------------------------------------------------------ */
+
+type Bridge = {
+  configured: boolean;
+  status: string;
+  error: string;
+  bot_name: string;
+  invite_url: string;
+  link: { discord_channel: string; discord_server: string; created_at: string } | null;
+};
+
+export function DiscordTab({ server }: { server: Server }) {
+  const text = server.channels.filter((c) => c.type === "text");
+  const ids = text.map((c) => c.id).join(",");
+  const [info, setInfo] = useState<Record<string, Bridge>>({});
+  const [error, setError] = useState("");
+  const first = Object.values(info)[0];
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all(ids.split(",").filter(Boolean).map((id) => api<Bridge>(`/channels/${id}/discord`).then((b) => [id, b] as const)))
+      .then((all) => alive && setInfo(Object.fromEntries(all)))
+      .catch((e) => alive && setError(errorText(e)));
+    return () => {
+      alive = false;
+    };
+  }, [ids]);
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="mb-5 font-display text-[28px] font-semibold">Ponte com o Discord</h2>
+      <p className="-mt-3 mb-5 text-[14px] leading-relaxed text-oat/55">
+        Liga um canal daqui a um canal do Discord: o que a turma escreve lá aparece aqui (com nome, foto, imagens e GIFs), e o que vocês escrevem aqui aparece lá. Assim quem ainda está no Discord não fica de fora da
+        conversa.
+      </p>
+      <FormError>{error}</FormError>
+      {first && !first.configured && (
+        <div className="mb-5 rounded-[14px] border border-honey/40 bg-honey/10 p-4 text-[13.5px] leading-relaxed text-oat/75">
+          <p className="font-semibold text-honey">A ponte ainda não foi ligada no servidor da API.</p>
+          <p className="mt-1">
+            Quem hospeda precisa criar um bot no Discord Developer Portal e colocar o token dele em <code>DISCORD_BOT_TOKEN</code> no <code>.env</code> (passo a passo no DEPLOY.md, seção “Ponte com o Discord”).
+          </p>
+        </div>
+      )}
+      {first?.configured && (
+        <div className="mb-5 flex flex-wrap items-center gap-3 rounded-[14px] bg-cocoa-3 p-4">
+          <span className={`size-2.5 shrink-0 rounded-full ${first.status === "ligado" ? "bg-moss" : first.status === "erro" ? "bg-rust" : "bg-honey"}`} aria-hidden />
+          <div className="min-w-0 flex-1 text-[13.5px]">
+            <p className="font-semibold">
+              {first.status === "ligado" ? `Bot ${first.bot_name} conectado ao Discord` : first.status === "erro" ? "O bot não conseguiu entrar no Discord" : "Conectando o bot ao Discord…"}
+            </p>
+            {first.error && <p className="mt-0.5 text-[12.5px] text-oat/55">{first.error}</p>}
+          </div>
+          {first.invite_url && (
+            <a href={first.invite_url} target="_blank" rel="noreferrer" className="btn-quiet h-9 px-3.5 text-[13px]">
+              <ExternalLink className="size-4" /> Pôr o bot no seu Discord
+            </a>
+          )}
+        </div>
+      )}
+      <div className="space-y-2">
+        {text.map((c) => (
+          <BridgeRow key={c.id} channel={c.name} channelId={c.id} info={info[c.id]} onChange={(b) => setInfo((m) => ({ ...m, [c.id]: b }))} />
+        ))}
+      </div>
+      <Tip>
+        Para desligar pelo Discord, um admin de lá digita <code>!ponte desligar</code> no canal. Imagens de lá ficam guardadas aqui na cota de quem ligou a ponte.
+      </Tip>
+    </div>
+  );
+}
+
+function BridgeRow({ channel, channelId, info, onChange }: { channel: string; channelId: string; info?: Bridge; onChange: (b: Bridge) => void }) {
+  const [code, setCode] = useState<{ command: string; until: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // esperando alguém digitar o código no Discord
+  useEffect(() => {
+    if (!code) return;
+    const t = window.setInterval(() => {
+      if (Date.now() > code.until) {
+        setCode(null);
+        return;
+      }
+      api<Bridge>(`/channels/${channelId}/discord`)
+        .then((b) => {
+          if (b.link) {
+            setCode(null);
+            onChange(b);
+            toast(`#${channel} ligado ao #${b.link.discord_channel} do Discord`);
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => window.clearInterval(t);
+  }, [code, channelId, channel, onChange]);
+
+  async function start() {
+    setBusy(true);
+    try {
+      const r = await api<{ command: string; expires_in: number }>(`/channels/${channelId}/discord/code`, { method: "POST" });
+      setCode({ command: r.command, until: Date.now() + r.expires_in * 1000 });
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlink() {
+    setBusy(true);
+    try {
+      await api(`/channels/${channelId}/discord`, { method: "DELETE" });
+      if (info) onChange({ ...info, link: null });
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = info?.configured && info.status === "ligado";
+  return (
+    <div className="rounded-[12px] bg-cocoa-3 px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1 truncate font-medium">
+          #{channel}
+          {info?.link && (
+            <span className="ml-2 text-[13px] font-normal text-oat/55">
+              ⇄ #{info.link.discord_channel} <span className="text-oat/35">({info.link.discord_server})</span>
+            </span>
+          )}
+        </span>
+        {info?.link ? (
+          <button type="button" disabled={busy} onClick={() => void unlink()} className="btn-quiet h-8 px-3 text-[12.5px] text-rust">
+            <Unlink className="size-3.5" /> Desligar
+          </button>
+        ) : (
+          <button type="button" disabled={busy || !ready} onClick={() => void start()} className="btn-quiet h-8 px-3 text-[12.5px]">
+            <Link2 className="size-3.5" /> Ligar ao Discord
+          </button>
+        )}
+      </div>
+      {code && !info?.link && (
+        <div className="mt-2.5 rounded-[10px] border border-ember/35 bg-ember/10 p-3 text-[13px] leading-relaxed">
+          <p>
+            No canal do Discord que vai ficar ligado ao <b>#{channel}</b>, alguém que administra o servidor de lá digita:
+          </p>
+          <div className="mt-2 flex gap-2">
+            <input readOnly value={code.command} className="field h-10 flex-1 font-mono text-[14px]" aria-label="Comando para digitar no Discord" onFocus={(e) => e.currentTarget.select()} />
+            <button
+              type="button"
+              className="btn-quiet h-10 px-3"
+              aria-label="Copiar comando"
+              onClick={() => {
+                void navigator.clipboard.writeText(code.command).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+            >
+              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+            </button>
+          </div>
+          <p className="mt-2 text-[12px] text-oat/50">O código vale 10 minutos. Esta tela atualiza sozinha quando o Discord confirmar.</p>
+        </div>
+      )}
     </div>
   );
 }

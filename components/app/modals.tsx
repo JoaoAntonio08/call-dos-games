@@ -12,7 +12,7 @@ import { BADGES, MAX_BADGES, nameColorOf, themeBgOf } from "@/lib/badges";
 import { BadgeRow } from "./badges";
 import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
 import { keyName } from "./user-bar";
-import { BotsTab, SteamSettings } from "./integracoes";
+import { BotsTab, DiscordTab, SteamSettings } from "./integracoes";
 import { DesktopAppSettings, DesktopGameSettings, hasDesktopApp } from "./jogo-app";
 import { ChannelAccess, MemberRoles, RolesTab } from "./cargos";
 import { BotBuilder } from "./bot-builder";
@@ -944,6 +944,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
           ["membros", "Membros"],
           ["bots", "Bots"],
           ["webhooks", "Webhooks"],
+          ["discord", "Ponte com o Discord"],
         ] as [string, string][])
       : []),
     ...(admin || server.my_perms?.includes("uso") ? ([["uso", "Uso"]] as [string, string][]) : []),
@@ -959,6 +960,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
       {tab === "cargos" && <RolesTab server={server} />}
       {tab === "bots" && <BotBuilder server={server} />}
       {tab === "webhooks" && <BotsTab server={server} />}
+      {tab === "discord" && <DiscordTab server={server} />}
       {tab === "uso" && <UsageTab serverId={server.id} />}
     </SettingsFrame>
   );
