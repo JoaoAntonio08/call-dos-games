@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cdg-notify"
+description = "Enables the cdg_notify command without any pre-configured scope."
+commands.allow = ["cdg_notify"]
+
+[[permission]]
+identifier = "deny-cdg-notify"
+description = "Denies the cdg_notify command without any pre-configured scope."
+commands.deny = ["cdg_notify"]

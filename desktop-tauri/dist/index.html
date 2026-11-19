@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Call dos Games</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; height: 100vh; display: grid; place-items: center; background: #1f2023; color: #f2f3f5; font: 15px/1.5 "Segoe UI", system-ui, sans-serif; text-align: center; }
+      h1 { font-size: 28px; margin: 0 0 6px; }
+      p { color: #c4c7ce; margin: 0 0 22px; max-width: 420px; }
+      button { font: inherit; font-weight: 600; background: #5865f2; color: #fff; border: 0; border-radius: 12px; padding: 11px 26px; cursor: pointer; }
+      button:hover { background: #7884f6; }
+      small { display: block; margin-top: 14px; color: #80848e; }
+      .roda { width: 34px; height: 34px; border: 3px solid #3a3c42; border-top-color: #5865f2; border-radius: 50%; margin: 0 auto 16px; animation: g 0.9s linear infinite; }
+      @keyframes g { to { transform: rotate(360deg); } }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <!-- Abre o site da turma. Sem internet ou com o site fora do ar, mostra a tela de "tentar de novo". -->
+    <div id="abrindo">
+      <div class="roda"></div>
+      <p>Abrindo o Call dos Games…</p>
+    </div>
+    <div id="offline" hidden>
+      <h1>Sem conexão com a turma</h1>
+      <p>Confira a internet. Se ela estiver ok, o servidor da turma pode estar desligado agora.</p>
+      <button id="retry">Tentar de novo</button>
+      <small id="auto"></small>
+    </div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let site = null;
+      let relogio = null;
+
+      async function tentar() {
+        clearInterval(relogio);
+        $("offline").hidden = true;
+        $("abrindo").hidden = false;
+        try {
+          site = site || (await window.__TAURI__.core.invoke("cdg_site"));
+          const ctl = new AbortController();
+          const t = setTimeout(() => ctl.abort(), 12000);
+          await fetch(site, { mode: "no-cors", cache: "no-store", signal: ctl.signal });
+          clearTimeout(t);
+          location.replace(site);
+        } catch {
+          semConexao();
+        }
+      }
+
+      function semConexao() {
+        $("abrindo").hidden = true;
+        $("offline").hidden = false;
+        let n = 15;
+        const mostra = () => ($("auto").textContent = n > 0 ? `Tentando de novo sozinho em ${n} s…` : "Tentando…");
+        mostra();
+        relogio = setInterval(() => {
+          n -= 1;
+          mostra();
+          if (n <= 0) tentar();
+        }, 1000);
+      }
+
+      $("retry").onclick = tentar;
+      window.addEventListener("online", tentar);
+      tentar();
+    </script>
+  </body>
+</html>

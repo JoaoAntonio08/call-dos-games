@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Tela de abertura do app (arquivo local)",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-cdg-site"
+  ]
+}

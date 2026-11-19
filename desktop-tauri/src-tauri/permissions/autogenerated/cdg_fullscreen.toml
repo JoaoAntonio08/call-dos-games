@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cdg-fullscreen"
+description = "Enables the cdg_fullscreen command without any pre-configured scope."
+commands.allow = ["cdg_fullscreen"]
+
+[[permission]]
+identifier = "deny-cdg-fullscreen"
+description = "Denies the cdg_fullscreen command without any pre-configured scope."
+commands.deny = ["cdg_fullscreen"]

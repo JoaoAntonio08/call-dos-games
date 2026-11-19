@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cdg-devtools"
+description = "Enables the cdg_devtools command without any pre-configured scope."
+commands.allow = ["cdg_devtools"]
+
+[[permission]]
+identifier = "deny-cdg-devtools"
+description = "Denies the cdg_devtools command without any pre-configured scope."
+commands.deny = ["cdg_devtools"]

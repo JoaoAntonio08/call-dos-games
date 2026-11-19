@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cdg-site"
+description = "Enables the cdg_site command without any pre-configured scope."
+commands.allow = ["cdg_site"]
+
+[[permission]]
+identifier = "deny-cdg-site"
+description = "Denies the cdg_site command without any pre-configured scope."
+commands.deny = ["cdg_site"]

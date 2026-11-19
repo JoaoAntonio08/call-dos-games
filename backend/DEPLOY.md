@@ -175,7 +175,8 @@ Quem usa o app de Windows também aparece como "Jogando X" sem Steam: o app reco
 
 - **Limite de pessoas** (Configurações do servidor → Canais, em cada sala de voz): 0 é sem limite. Sala cheia barra quem chega; quem pode moderar a call entra assim mesmo.
 - **Avisos:** DM e menção (`@nome`, `@todos`) tocam um som e mostram aviso (notificação do Windows se a janela estiver em segundo plano). Botão direito no canal ou no servidor: **Marcar como lida**, **Silenciar**. Cada um ajusta em **Configurações → Notificações**.
-- **App de Windows 1.4.0:** fechar no X deixa o app na bandeja (perto do relógio) com a call rolando; "Fechar de vez" e "Sair da call" ficam no menu da bandeja. Em **Configurações → App de Windows**: abrir junto com o Windows, abrir escondido e continuar rodando ao fechar.
+- **App de Windows 2.0.0 (Rust/Tauri, pasta `desktop-tauri/`):** substitui o de Electron (`desktop/`, mantido de reserva). Instalador de ~2 MB que tira o app antigo sozinho; quem troca precisa entrar na conta de novo uma vez. Como antes, o app só abre o site.
+- **App de Windows (desde 1.4.0):** fechar no X deixa o app na bandeja (perto do relógio) com a call rolando; "Fechar de vez" e "Sair da call" ficam no menu da bandeja. Em **Configurações → App de Windows**: abrir junto com o Windows, abrir escondido e continuar rodando ao fechar.
 
 ### Uso de transmissão (tela e câmera)
 
