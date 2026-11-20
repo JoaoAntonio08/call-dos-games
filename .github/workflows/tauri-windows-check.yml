@@ -27,9 +27,9 @@ jobs:
       - name: Install desktop dependencies
         run: npm ci
         working-directory: desktop-tauri
-      - name: Test Windows app and refresh lockfile
-        run: cargo test --manifest-path desktop-tauri/src-tauri/Cargo.toml
-      - name: Upload resolved lockfile for review
+      - name: Test Windows app with locked dependencies
+        run: cargo test --locked --manifest-path desktop-tauri/src-tauri/Cargo.toml
+      - name: Upload lockfile for review
         if: always()
         uses: actions/upload-artifact@v4
         with:

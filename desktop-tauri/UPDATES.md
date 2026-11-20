@@ -14,4 +14,4 @@ Sem `CDG_UPDATER_PUBKEY` no **build** do cliente, a atualização permanece desa
 
 O cliente 2.0.0 anterior tem o atualizador inseguro desativado. Ele não receberá a versão 2.0.1 automaticamente; usuários existentes devem instalar manualmente o primeiro cliente assinado a partir de um canal confiável. Não reativar o fluxo antigo para essa transição.
 
-Não usar build Linux como evidência de funcionamento do instalador Windows. O workflow de PR verifica a compilação e testes Rust no Windows; a assinatura e instalação precisam do teste separado acima.
+Não usar build Linux como evidência de funcionamento do instalador Windows. O workflow de PR verifica a compilação e testes Rust no Windows, inclusive uma assinatura Tauri de arquivo sintético e rejeição de adulterações. A instalação real precisa do teste separado acima.
