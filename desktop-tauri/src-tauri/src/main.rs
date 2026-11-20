@@ -520,7 +520,8 @@ fn cdg_notify(app: AppHandle, webview: Webview, estado: tauri::State<Estado>, ti
     so_do_site(&webview, &estado)?;
     let titulo: String = title.chars().take(120).collect();
     let texto: String = body.chars().take(400).collect();
-    avisar(&app, &titulo, &texto);
+    // sem o som do Windows: o site toca o som que a pessoa escolheu nas Notificações (ou nenhum)
+    let _ = app.notification().builder().title(titulo).body(texto).silent().show();
     Ok(())
 }
 
