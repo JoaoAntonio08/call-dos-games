@@ -66,3 +66,4 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+backend/ponte-voz/node_modules/

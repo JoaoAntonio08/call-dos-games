@@ -1,0 +1,22 @@
+{
+  "name": "call-dos-games-ponte-voz",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Leva o áudio entre uma call do Call dos Games (LiveKit) e uma call do Discord",
+  "type": "module",
+  "main": "src/index.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "@livekit/rtc-node": "^1.2.3",
+    "discord.js": "^14.28.1",
+    "livekit-server-sdk": "^2.20.1",
+    "opusscript": "^0.1.1"
+  }
+}

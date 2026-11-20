@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { api, ApiError, GATEWAY_URL, getToken, setToken } from "./api";
-import type { Bootstrap, Dm, Friend, Game, HallEntry, Me, Message, NowPlaying, Presence, QueueItem, Server, Show, User, VoiceMember } from "./types";
+import type { Bootstrap, DiscordVoiceMember, Dm, Friend, Game, HallEntry, Me, Message, NowPlaying, Presence, QueueItem, Server, Show, User, VoiceMember } from "./types";
 
 interface ChannelMessages {
   items: Message[];
@@ -32,6 +32,7 @@ interface State {
   voice: Record<string, VoiceMember[]>;
   /** o que o DJ toca em cada call */
   music: Record<string, NowPlaying>;
+  discordVoice: Record<string, DiscordVoiceMember[]>;
   typing: Record<string, Record<string, number>>;
   /** por servidor; undefined = ainda não carregou */
   hall: Record<string, { items: HallEntry[]; hasMore: boolean } | undefined>;
@@ -60,6 +61,7 @@ export const useStore = create<State>(() => ({
   reads: {},
   voice: {},
   music: {},
+  discordVoice: {},
   typing: {},
   hall: {},
   shows: {},
@@ -192,6 +194,7 @@ export async function bootstrap() {
       reads: b.read_states,
       voice: b.voice,
       music: b.music ?? {},
+      discordVoice: b.discord_voice ?? {},
     });
     gateway.connect();
     api<State["features"]>("/features")
@@ -216,7 +219,7 @@ export async function logout() {
   }
   setToken(null);
   gateway.close();
-  set({ phase: "anon", me: null, servers: {}, serverOrder: [], dms: [], friends: [], messages: {}, voice: {}, music: {}, hall: {}, shows: {}, queue: {} });
+  set({ phase: "anon", me: null, servers: {}, serverOrder: [], dms: [], friends: [], messages: {}, voice: {}, music: {}, discordVoice: {}, hall: {}, shows: {}, queue: {} });
 }
 
 /* ------------------------------------------------------------------ */
@@ -322,7 +325,7 @@ class Gateway {
         if (t === "hello") {
           this.retry = 0;
           const first = !get().connected;
-          set({ connected: true, ...(d?.voice ? { voice: d.voice } : {}), ...(d?.music ? { music: d.music } : {}), ...(d?.games ? { games: d.games } : {}) });
+          set({ connected: true, ...(d?.voice ? { voice: d.voice } : {}), ...(d?.music ? { music: d.music } : {}), ...(d?.discord_voice ? { discordVoice: d.discord_voice } : {}), ...(d?.games ? { games: d.games } : {}) });
           window.clearInterval(this.pinger);
           this.pinger = window.setInterval(() => this.send({ op: "ping" }), 30_000);
           // depois de cair, recarrega tudo para não perder nada que aconteceu offline
@@ -387,6 +390,7 @@ async function refreshAfterReconnect() {
       friends: b.friends,
       voice: b.voice,
       music: b.music ?? {},
+      discordVoice: b.discord_voice ?? {},
       reads: { ...b.read_states, ...s.reads },
       users: rememberUsers([b.me, ...b.servers.flatMap((x) => x.members.map((m) => m.user)), ...b.friends.map((f) => f.user)], { ...s.users }),
     }));
@@ -537,6 +541,9 @@ function handleEvent(t: string, d: any) {
     case "voice_state":
       set((s) => ({ voice: { ...s.voice, [d.channel_id]: d.members } }));
       window.dispatchEvent(new CustomEvent("cdg:voice", { detail: d }));
+      break;
+    case "discord_voice":
+      set((s) => ({ discordVoice: { ...s.discordVoice, [d.channel_id]: d.members ?? [] } }));
       break;
     case "music_state":
       set((s) => {

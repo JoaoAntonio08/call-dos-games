@@ -6,6 +6,8 @@ Como funciona:
 - Mensagem nova aqui → vai para lá por um webhook que o bot cria no canal, com o seu nome e a sua foto.
 - Para ligar: um admin do servidor daqui gera um código e alguém que administra o Discord digita
   `!ponte CÓDIGO` no canal de lá. Assim ninguém espelha um canal do Discord que não administra.
+- Canal de voz: o código é digitado no chat do canal de voz do Discord. Daí quem está na call de lá
+  aparece aqui, e o serviço ponte-voz (Node, à parte) leva o áudio entre as duas calls.
 """
 
 from __future__ import annotations
@@ -23,11 +25,12 @@ from urllib.parse import urlparse
 
 import httpx
 import websockets
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Header, HTTPException, Request, UploadFile
 
 from ..core import Auth, CurrentUser, env, err, parse_id, pool, settings, sid
 from ..files import save_upload
-from .extras2 import _text_channel_admin
+from .servers import require_admin
+from ..realtime import hub
 
 router = APIRouter()
 log = logging.getLogger("cdg.discord")
@@ -37,10 +40,15 @@ TOKEN = env("DISCORD_BOT_TOKEN")
 API = env("DISCORD_API_BASE", "https://discord.com/api/v10").rstrip("/")
 CDN_HOSTS = {"cdn.discordapp.com", "media.discordapp.net", urlparse(API).hostname or ""}
 
-# o que o bot precisa receber: servidores, mensagens e o texto delas (ligar "Message Content Intent" no portal)
-INTENTS = (1 << 0) | (1 << 9) | (1 << 15)
-# permissões do convite: ver canais, mandar mensagem, links, arquivos, histórico e gerenciar webhooks
-PERMS = 1024 | 2048 | 16384 | 32768 | 65536 | 536870912
+# o que o bot precisa receber: servidores, quem está nas calls, mensagens e o texto delas
+# (ligar "Message Content Intent" no portal; as outras não precisam de liberação)
+INTENTS = (1 << 0) | (1 << 7) | (1 << 9) | (1 << 15)
+# permissões do convite: ver canais, mandar mensagem, links, arquivos, histórico, gerenciar webhooks,
+# e na voz: conectar, falar e usar detecção de voz
+PERMS = 1024 | 2048 | 16384 | 32768 | 65536 | 536870912 | 1048576 | 2097152 | 33554432
+# segredo que o serviço ponte-voz manda para ler as ligações de voz (só pela própria máquina)
+VOICE_SECRET = env("DISCORD_VOICE_SECRET")
+DISCORD_VOICE_TYPES = (2,)  # canal de voz comum
 ADMIN_BITS = 8 | 16 | 32  # Administrador, Gerenciar canais, Gerenciar servidor
 
 MAX_FILE = 10 * 1024 * 1024  # webhook do Discord sem impulso aceita até 10 MB
@@ -65,7 +73,12 @@ class _Ponte:
         self.guilds: dict[str, dict] = {}
         self.links: dict[str, dict] = {}  # canal do Discord -> ligação
         self.by_channel: dict[int, dict] = {}  # canal daqui -> ligação
-        self.codes: dict[str, tuple[int, int, float]] = {}  # código -> (canal daqui, quem gerou, validade)
+        self.codes: dict[str, tuple[int, int, float, str]] = {}  # código -> (canal daqui, quem gerou, validade, tipo)
+        # voz: canal de voz do Discord <-> canal de voz daqui
+        self.vlinks: dict[str, dict] = {}
+        self.vby_channel: dict[int, dict] = {}
+        # quem está nas calls do Discord: servidor -> pessoa -> estado (canal, nome, foto, mudo, sem som, bot)
+        self.voice: dict[str, dict[str, dict]] = {}
         self.locks: dict[int, asyncio.Lock] = {}
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_CAPACITY)
         self.workers: list[asyncio.Task] = []
@@ -124,6 +137,28 @@ class _Ponte:
             self.links.pop(link["discord_channel_id"], None)
         return link
 
+    def vput(self, link: dict) -> None:
+        old = self.vby_channel.get(link["channel_id"])
+        if old:
+            self.vlinks.pop(old["discord_channel_id"], None)
+        self.vlinks[link["discord_channel_id"]] = link
+        self.vby_channel[link["channel_id"]] = link
+
+    def vdrop(self, channel_id: int) -> dict | None:
+        link = self.vby_channel.pop(channel_id, None)
+        if link:
+            self.vlinks.pop(link["discord_channel_id"], None)
+        return link
+
+    def in_call(self, link: dict) -> list[dict]:
+        """Quem está agora no canal de voz do Discord ligado (sem bots)."""
+        people = self.voice.get(link["discord_guild_id"], {})
+        return [
+            {"id": uid, "name": st["name"], "avatar": st["avatar"], "mute": st["mute"], "deaf": st["deaf"]}
+            for uid, st in people.items()
+            if st["channel_id"] == link["discord_channel_id"] and not st["bot"]
+        ]
+
 
 ponte = _Ponte()
 
@@ -151,6 +186,8 @@ async def _load_links() -> None:
     rows = await pool().fetch("SELECT * FROM discord_links")
     for r in rows:
         ponte.put(dict(r))
+    for r in await pool().fetch("SELECT * FROM discord_voice_links"):
+        ponte.vput(dict(r))
 
 
 # ------------------------------------------------------------------ gateway (Discord → aqui)
@@ -251,7 +288,50 @@ def _guild_from(d: dict) -> dict:
         "owner_id": str(d.get("owner_id") or ""),
         "roles": {str(r["id"]): int(r.get("permissions") or 0) for r in d.get("roles") or []},
         "channels": {str(c["id"]): c.get("name") or "" for c in d.get("channels") or []},
+        "types": {str(c["id"]): int(c.get("type") or 0) for c in d.get("channels") or []},
     }
+
+
+def _voice_state(gid: str, vs: dict, member: dict | None = None) -> None:
+    """Atualiza quem está em qual call do Discord e avisa aqui se mexeu num canal ligado."""
+    member = member or vs.get("member") or {}
+    user = member.get("user") or vs.get("user") or {}
+    uid = str(vs.get("user_id") or user.get("id") or "")
+    if not uid:
+        return
+    people = ponte.voice.setdefault(gid, {})
+    old = people.get(uid, {})
+    before = old.get("channel_id")
+    after = str(vs.get("channel_id") or "")
+    if after:
+        people[uid] = {
+            "channel_id": after,
+            "name": _display(user, member) if user else old.get("name", "Alguém"),
+            "avatar": _avatar(user, member, gid) if user else old.get("avatar", ""),
+            "mute": bool(vs.get("self_mute") or vs.get("mute")),
+            "deaf": bool(vs.get("self_deaf") or vs.get("deaf")),
+            "bot": bool(user.get("bot")) if user else old.get("bot", False),
+        }
+    else:
+        people.pop(uid, None)
+    for ch in {before, after}:
+        link = ponte.vlinks.get(ch or "")
+        if link:
+            _voice_changed(link)
+
+
+def _voice_changed(link: dict) -> None:
+    try:
+        asyncio.get_running_loop().create_task(_announce_voice(link))
+    except RuntimeError:
+        pass  # fora do loop (testes)
+
+
+async def _announce_voice(link: dict) -> None:
+    try:
+        await hub.to_channel(link["channel_id"], "discord_voice", {"channel_id": sid(link["channel_id"]), "members": ponte.in_call(link)})
+    except Exception:
+        log.warning("ponte: não avisei quem está na call do Discord")
 
 
 def _dispatch(t: str, d: dict) -> None:
@@ -267,8 +347,21 @@ def _dispatch(t: str, d: dict) -> None:
         if t == "GUILD_UPDATE":  # não traz a lista de canais
             new["channels"] = g.get("channels", {})
         ponte.guilds[str(d["id"])] = new
+        if t == "GUILD_CREATE":
+            gid = str(d["id"])
+            members = {str((m.get("user") or {}).get("id")): m for m in d.get("members") or []}
+            ponte.voice[gid] = {}
+            for vs in d.get("voice_states") or []:
+                _voice_state(gid, vs, members.get(str(vs.get("user_id"))))
+            for link in ponte.vlinks.values():
+                if link["discord_guild_id"] == gid:
+                    _voice_changed(link)
     elif t == "GUILD_DELETE":
         ponte.guilds.pop(str(d.get("id")), None)
+        ponte.voice.pop(str(d.get("id")), None)
+    elif t == "VOICE_STATE_UPDATE":
+        if d.get("guild_id"):
+            _voice_state(str(d["guild_id"]), d)
     elif t in ("GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE"):
         g = ponte.guilds.get(str(d.get("guild_id")))
         if g and d.get("role"):
@@ -281,6 +374,7 @@ def _dispatch(t: str, d: dict) -> None:
         g = ponte.guilds.get(str(d.get("guild_id")))
         if g:
             g["channels"][str(d["id"])] = d.get("name") or ""
+            g.setdefault("types", {})[str(d["id"])] = int(d.get("type") or 0)
     elif t == "MESSAGE_CREATE":
         if str(d.get("channel_id")) in ponte.links or (d.get("content") or "").lstrip().lower().startswith("!ponte"):
             ponte.submit(_on_discord_message, d)
@@ -336,6 +430,11 @@ async def _command(d: dict, arg: str) -> None:
         await _reply(d, "Só quem administra este servidor do Discord (ou gerencia canais) pode ligar ou desligar a ponte.")
         return
     if arg.lower() in ("desligar", "parar", "off"):
+        vlink = ponte.vlinks.get(dc_channel)
+        if vlink:
+            await _vunlink(vlink["channel_id"])
+            await _reply(d, "Ponte de voz desligada. Esta call não vai mais para o Call dos Games.")
+            return
         link = ponte.links.get(dc_channel)
         if not link:
             await _reply(d, "Este canal não está ligado a nenhum canal do Call dos Games.")
@@ -349,7 +448,13 @@ async def _command(d: dict, arg: str) -> None:
     if not got or got[2] < time.time():
         await _reply(d, "Código inválido ou vencido. Gere outro nas configurações do canal no Call dos Games.")
         return
-    channel_id, user_id, _ = got
+    channel_id, user_id, _, kind = got
+    if kind == "voice":
+        await _link_voice(d, code, channel_id, user_id)
+        return
+    if ponte.guilds.get(str(d["guild_id"]), {}).get("types", {}).get(dc_channel) in DISCORD_VOICE_TYPES:
+        await _reply(d, "Este código é de um canal de texto do Call dos Games. Digite num canal de texto daqui.")
+        return
     other = ponte.links.get(dc_channel)
     if other and other["channel_id"] != channel_id:
         await _reply(d, "Este canal já está ligado a outro canal do Call dos Games. Digite `!ponte desligar` primeiro.")
@@ -383,6 +488,36 @@ async def _command(d: dict, arg: str) -> None:
     await post_webhook_message(
         channel_id, channel_id, "Ponte do Discord",
         f"Este canal agora está ligado ao #{dc_name} do Discord ({g.get('name') or 'servidor'}). O que for escrito aqui aparece lá, e vice-versa.",
+    )
+
+
+async def _link_voice(d: dict, code: str, channel_id: int, user_id: int) -> None:
+    dc_channel = str(d["channel_id"])
+    g = ponte.guilds.get(str(d["guild_id"]), {})
+    if g.get("types", {}).get(dc_channel) not in DISCORD_VOICE_TYPES:
+        await _reply(d, "Este código é de uma call. Digite no chat do canal de voz do Discord (o balãozinho ao lado do nome da call).")
+        return
+    other = ponte.vlinks.get(dc_channel)
+    if other and other["channel_id"] != channel_id:
+        await _reply(d, "Esta call já está ligada a outra call do Call dos Games. Digite `!ponte desligar` primeiro.")
+        return
+    ponte.codes.pop(code, None)
+    dc_name = g.get("channels", {}).get(dc_channel, "") or "call"
+    row = await pool().fetchrow(
+        """INSERT INTO discord_voice_links (channel_id, discord_channel_id, discord_guild_id, discord_name, guild_name, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (channel_id) DO UPDATE SET discord_channel_id = EXCLUDED.discord_channel_id, discord_guild_id = EXCLUDED.discord_guild_id,
+             discord_name = EXCLUDED.discord_name, guild_name = EXCLUDED.guild_name, created_by = EXCLUDED.created_by, created_at = now()
+           RETURNING *""",
+        channel_id, dc_channel, str(d["guild_id"]), dc_name, g.get("name", ""), user_id,
+    )
+    ponte.vput(dict(row))
+    _voice_changed(ponte.vby_channel[channel_id])
+    name = await pool().fetchval("SELECT name FROM channels WHERE id = $1", channel_id) or "call"
+    await _reply(
+        d,
+        f"Pronto! Esta call agora está ligada à call {name} do Call dos Games. "
+        "Quando tiver gente nas duas, eu entro aqui e passo o áudio de um lado para o outro.",
     )
 
 
@@ -552,11 +687,37 @@ async def _unlink(channel_id: int, *, delete_hook: bool = True) -> dict | None:
     return link
 
 
+async def _vunlink(channel_id: int) -> dict | None:
+    link = ponte.vdrop(channel_id)
+    await pool().execute("DELETE FROM discord_voice_links WHERE channel_id = $1", channel_id)
+    if link:
+        await hub.to_channel(channel_id, "discord_voice", {"channel_id": sid(channel_id), "members": []})
+    return link
+
+
+def discord_voice_snapshot(channel_ids: Any) -> dict[str, list[dict]]:
+    """Quem está nas calls do Discord ligadas, para os canais de voz que a pessoa vê."""
+    out: dict[str, list[dict]] = {}
+    for cid in channel_ids:
+        link = ponte.vby_channel.get(int(cid))
+        if link:
+            out[sid(link["channel_id"])] = ponte.in_call(link)
+    return out
+
+
 # ------------------------------------------------------------------ telas de configuração
 
 
 def _status() -> dict:
     return {"configured": bool(TOKEN), "status": ponte.status, "error": ponte.erro, "bot_name": ponte.bot_name, "invite_url": ponte.invite_url()}
+
+
+async def _bridge_admin(channel_id: int, user_id: int) -> dict:
+    ch = await pool().fetchrow("SELECT id, server_id, type, name FROM channels WHERE id = $1", channel_id)
+    if not ch or ch["server_id"] is None or ch["type"] not in ("text", "voice"):
+        raise err(404, "Canal não encontrado.")
+    await require_admin(ch["server_id"], user_id)
+    return dict(ch)
 
 
 def _link_out(link: dict | None) -> dict | None:
@@ -572,14 +733,17 @@ def _link_out(link: dict | None) -> dict | None:
 @router.get("/channels/{channel_id}/discord")
 async def get_bridge(channel_id: str, me: Auth = CurrentUser) -> dict:
     cid = parse_id(channel_id)
-    await _text_channel_admin(cid, me.id)
+    ch = await _bridge_admin(cid, me.id)
+    if ch["type"] == "voice":
+        link = ponte.vby_channel.get(cid)
+        return {**_status(), "link": _link_out(link), "in_call": ponte.in_call(link) if link else []}
     return {**_status(), "link": _link_out(ponte.by_channel.get(cid))}
 
 
 @router.post("/channels/{channel_id}/discord/code")
 async def bridge_code(channel_id: str, me: Auth = CurrentUser) -> dict:
     cid = parse_id(channel_id)
-    await _text_channel_admin(cid, me.id)
+    ch = await _bridge_admin(cid, me.id)
     if not TOKEN:
         raise err(400, "A ponte com o Discord ainda não foi configurada no servidor (falta o DISCORD_BOT_TOKEN).")
     now = time.time()
@@ -589,7 +753,7 @@ async def bridge_code(channel_id: str, me: Auth = CurrentUser) -> dict:
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     a = "".join(secrets.choice(alphabet) for _ in range(4))
     b = "".join(secrets.choice(alphabet) for _ in range(4))
-    ponte.codes[a + b] = (cid, me.id, now + CODE_TTL)
+    ponte.codes[a + b] = (cid, me.id, now + CODE_TTL, ch["type"])
     return {"code": f"{a}-{b}", "command": f"!ponte {a}-{b}", "expires_in": CODE_TTL, **_status()}
 
 
@@ -598,8 +762,36 @@ async def delete_bridge(channel_id: str, me: Auth = CurrentUser) -> dict:
     from .messages import post_webhook_message
 
     cid = parse_id(channel_id)
-    await _text_channel_admin(cid, me.id)
+    ch = await _bridge_admin(cid, me.id)
+    if ch["type"] == "voice":
+        await _vunlink(cid)
+        return {"ok": True, "id": sid(cid)}
     link = await _unlink(cid)
     if link:
         await post_webhook_message(cid, cid, "Ponte do Discord", "A ponte com o Discord foi desligada.")
     return {"ok": True, "id": sid(cid)}
+
+
+# ------------------------------------------------------------------ serviço ponte-voz (Node, na mesma máquina)
+
+
+@router.get("/internal/discord-voice")
+async def voice_bridge_state(request: Request, x_bridge_secret: str = Header(default="")) -> dict:
+    """O que o ponte-voz precisa: as calls ligadas e se tem gente dos dois lados (aí ele entra)."""
+    host = request.client.host if request.client else ""
+    if not VOICE_SECRET or not secrets.compare_digest(x_bridge_secret, VOICE_SECRET) or host not in ("127.0.0.1", "::1"):
+        raise err(404, "Não encontrado.")
+    out = []
+    for link in list(ponte.vby_channel.values()):
+        here = [uid for uid, st in hub.voice.get(link["channel_id"], {}).items() if not st.get("sdeaf")]
+        there = ponte.in_call(link)
+        out.append({
+            "channel_id": sid(link["channel_id"]),
+            "room": f"cdg-{link['channel_id']}",
+            "guild_id": link["discord_guild_id"],
+            "discord_channel_id": link["discord_channel_id"],
+            "app_people": len(here),
+            "discord_people": len(there),
+            "active": bool(here and there),
+        })
+    return {"bot_ready": ponte.status == "ligado", "links": out}

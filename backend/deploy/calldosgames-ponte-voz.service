@@ -1,0 +1,20 @@
+# /etc/systemd/system/calldosgames-ponte-voz.service
+# Ponte de voz com o Discord (opcional). Lê o backend/.env: DISCORD_BOT_TOKEN, DISCORD_VOICE_SECRET e LIVEKIT_*.
+# Sem DISCORD_BOT_TOKEN ou DISCORD_VOICE_SECRET ele sai na hora (sem erro) e não fica reiniciando.
+[Unit]
+Description=Call dos Games - ponte de voz com o Discord
+After=network-online.target calldosgames-api.service
+Wants=network-online.target
+
+[Service]
+User=calldosgames
+WorkingDirectory=/opt/calldosgames/app/backend/ponte-voz
+ExecStart=/usr/bin/node src/index.mjs
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

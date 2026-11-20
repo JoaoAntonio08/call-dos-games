@@ -8,7 +8,7 @@ import { api, errorText } from "@/lib/api";
 import { isUnread, markRead, useNameInServer, useStore, useUser, usePresence } from "@/lib/store";
 import { openModal, openProfile, openUserMenu, toast, type ServerPage } from "@/lib/ui";
 import { useVoice } from "@/lib/voice";
-import type { Channel, Dm, NowPlaying, Server, VoiceMember } from "@/lib/types";
+import type { Channel, DiscordVoiceMember, Dm, NowPlaying, Server, VoiceMember } from "@/lib/types";
 import { AnimImg, Avatar, Popover, useAnchor } from "./bits";
 import { canModerate, dragProps, moveToChannel, useDropTarget } from "./user-menu";
 import { isMuted, toggleChannelMute, useSilence } from "./avisos";
@@ -242,8 +242,12 @@ function TextRow({ server, channel, active, unread: rawUnread }: { server: Serve
   );
 }
 
+const NO_ONE: DiscordVoiceMember[] = [];
+
 function VoiceRow({ server, channel, active }: { server: Server; channel: Channel; active: boolean }) {
   const members = useStore((s) => s.voice[channel.id]) ?? [];
+  // quem está na call do Discord ligada a esta (ponte de voz)
+  const fromDiscord = useStore((s) => s.discordVoice[channel.id]) ?? NO_ONE;
   const music = useStore((s) => s.music[channel.id]);
   const me = useStore((s) => s.me);
   const v = useVoice();
@@ -273,15 +277,31 @@ function VoiceRow({ server, channel, active }: { server: Server; channel: Channe
           members.length > 0 && <span className="ml-auto text-[11.5px] tabular-nums text-oat/40">{members.length}</span>
         )}
       </Link>
-      {(members.length > 0 || music) && (
+      {(members.length > 0 || music || fromDiscord.length > 0) && (
         <ul className="mb-1 ml-7 mt-0.5 space-y-px">
           {members.map((m) => (
             <VoiceMemberRow key={m.user_id} m={m} serverId={server.id} />
           ))}
           {music && <DjRow music={music} />}
+          {fromDiscord.map((m) => (
+            <DiscordMemberRow key={`dc${m.id}`} m={m} />
+          ))}
         </ul>
       )}
     </div>
+  );
+}
+
+/** Quem está na call do Discord ligada (ponte de voz): escuta e fala com a call daqui. */
+function DiscordMemberRow({ m }: { m: DiscordVoiceMember }) {
+  const avatar = m.avatar ? { url: m.avatar, still: m.avatar.replace(/\.gif(\?|$)/, ".png$1"), animated: m.avatar.includes(".gif") } : null;
+  return (
+    <li className="flex h-8 items-center gap-2 rounded-[8px] px-1.5 text-[13.5px] text-oat/70" title={`${m.name} está na call pelo Discord`}>
+      <Avatar name={m.name} avatar={avatar} accent="#5865f2" size={22} />
+      <span className="min-w-0 flex-1 truncate">{m.name}</span>
+      <span className="shrink-0 rounded-[5px] bg-[#5865f2] px-1 text-[9.5px] font-bold uppercase tracking-wide text-white">Discord</span>
+      {m.deaf ? <HeadphoneOff className="size-3.5 text-rust" aria-label="Sem som" /> : m.mute && <MicOff className="size-3.5 text-rust" aria-label="Mudo" />}
+    </li>
   );
 }
 
