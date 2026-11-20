@@ -8,8 +8,6 @@ mod jogos;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::Mutex;
@@ -19,7 +17,7 @@ use tauri::ipc::CapabilityBuilder;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::{NewWindowResponse, PermissionKind, PermissionResponse};
-use tauri::window::{Color, ProgressBarState, ProgressBarStatus};
+use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, Url, Webview, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -27,10 +25,8 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 /// Só baixa instalador das versões publicadas do projeto no GitHub.
-const RELEASES: &str = "https://github.com/JoaoAntonio08/call-dos-games/releases/download/";
 /// Login com Google abre na janelinha do próprio Google; o resto de fora vai para o navegador.
 const POPUP_HOSTS: &[&str] = &["accounts.google.com"];
-const SEM_JANELA: u32 = 0x0800_0000; // CREATE_NO_WINDOW: comandos auxiliares sem piscar janela preta
 
 /* ------------------------------------------------------------------ preferências e estado */
 
@@ -81,7 +77,6 @@ struct Estado {
     /// true quando a pessoa mandou fechar de vez (bandeja, atualização)
     fechando: AtomicBool,
     avisou_bandeja: AtomicBool,
-    atualizando: AtomicBool,
 }
 
 impl Estado {
@@ -508,98 +503,9 @@ fn cdg_devtools(window: WebviewWindow) {
 
 /* ------------------------------------------------------------------ atualização do próprio app */
 
-fn barra(app: &AppHandle, pct: Option<f64>) {
-    if let Some(w) = app.get_webview_window("main") {
-        let estado = match pct {
-            Some(p) => ProgressBarState { status: Some(ProgressBarStatus::Normal), progress: Some((p * 100.0) as u64) },
-            None => ProgressBarState { status: Some(ProgressBarStatus::None), progress: None },
-        };
-        let _ = w.set_progress_bar(estado);
-    }
-}
-
-fn baixar_e_instalar(app: &AppHandle, url: &str) -> Result<(), String> {
-    let mut resp = ureq::get(url).call().map_err(|e| format!("download falhou ({e})"))?;
-    let total: u64 = resp
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let nome = url.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("Call-dos-Games-Setup.exe");
-    let arquivo = std::env::temp_dir().join(nome);
-    let mut saida = fs::File::create(&arquivo).map_err(|e| e.to_string())?;
-    let mut leitor = resp.body_mut().as_reader();
-    let mut buf = vec![0u8; 64 * 1024];
-    let (mut baixado, mut ultimo) = (0u64, -1i64);
-    loop {
-        let n = leitor.read(&mut buf).map_err(|e| format!("download falhou ({e})"))?;
-        if n == 0 {
-            break;
-        }
-        saida.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        baixado += n as u64;
-        if total > 0 {
-            let pct = baixado as f64 / total as f64;
-            let passo = (pct * 100.0) as i64;
-            if passo != ultimo {
-                ultimo = passo;
-                barra(app, Some(pct));
-                let _ = app.emit("cdg:update-progress", pct);
-            }
-        }
-    }
-    saida.flush().map_err(|e| e.to_string())?;
-    drop(saida);
-    if total > 0 && baixado != total {
-        return Err("download incompleto".into());
-    }
-    barra(app, None);
-    // espera o app fechar e instala por cima sem perguntar nada; o instalador abre o app de novo no fim
-    let caminho = arquivo.to_string_lossy().replace('\'', "''");
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &format!("Start-Sleep -Seconds 2; Start-Process -FilePath '{caminho}' -ArgumentList '/S'"),
-        ])
-        .creation_flags(SEM_JANELA)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let a = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(400));
-        fechar_de_vez(&a);
-    });
-    Ok(())
-}
-
 #[tauri::command]
-async fn cdg_update(app: AppHandle, webview: Webview, url: String) -> Result<String, String> {
-    {
-        let e = app.state::<Estado>();
-        so_do_site(&webview, &e)?;
-        if !url.starts_with(RELEASES) || !url.ends_with(".exe") || url.contains("..") {
-            return Err("Endereço de atualização inválido.".into());
-        }
-        if e.atualizando.swap(true, SeqCst) {
-            return Ok("baixando".into());
-        }
-    }
-    let a = app.clone();
-    let r = tauri::async_runtime::spawn_blocking(move || baixar_e_instalar(&a, &url))
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r);
-    if let Err(err) = r {
-        app.state::<Estado>().atualizando.store(false, SeqCst);
-        barra(&app, None);
-        return Err(err);
-    }
-    Ok("instalando".into())
+fn cdg_update() -> Result<String, String> {
+    Err("Atualizações automáticas desabilitadas até a configuração da assinatura.".into())
 }
 
 /* ------------------------------------------------------------------ início */
@@ -683,7 +589,6 @@ fn main() {
                 jogo: Mutex::new(None),
                 fechando: AtomicBool::new(false),
                 avisou_bandeja: AtomicBool::new(false),
-                atualizando: AtomicBool::new(false),
             });
             // o site (de fora do app) pode chamar os comandos acima e ouvir os eventos do app
             app.add_capability(
