@@ -26,7 +26,17 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
 /// O manifesto é fixo; a assinatura do artefato é conferida pelo plugin antes da instalação.
-const UPDATE_MANIFEST: &str = "https://github.com/JoaoAntonio08/call-dos-games/releases/latest/download/latest.json";
+const UPDATE_MANIFEST: &str = "https://github.com/JoaoAntonio08/call-dos-games/releases/download/desktop-latest/latest.json";
+
+#[cfg(test)]
+mod updater_channel_tests {
+    use super::UPDATE_MANIFEST;
+
+    #[test]
+    fn desktop_uses_its_own_release_channel() {
+        assert!(UPDATE_MANIFEST.ends_with("/releases/download/desktop-latest/latest.json"));
+    }
+}
 
 fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
     let pubkey = option_env!("CDG_UPDATER_PUBKEY")
