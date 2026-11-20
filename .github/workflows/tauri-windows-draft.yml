@@ -1,0 +1,48 @@
+name: Build signed Windows draft
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    environment: windows-updater
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-tauri/src-tauri -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop-tauri/package-lock.json
+      - name: Verify signing configuration
+        shell: pwsh
+        env:
+          CDG_UPDATER_PUBKEY: ${{ vars.CDG_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CDG_UPDATER_PUBKEY)) { throw 'Updater public key missing' }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Updater signing key missing' }
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: desktop-tauri
+      - name: Build signed draft release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CDG_UPDATER_PUBKEY: ${{ vars.CDG_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop-tauri
+          tagName: desktop-v__VERSION__
+          releaseName: Call dos Games Desktop v__VERSION__
+          releaseDraft: true
+          prerelease: false

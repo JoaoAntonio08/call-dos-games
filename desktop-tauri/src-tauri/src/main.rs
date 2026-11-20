@@ -23,6 +23,33 @@ use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
+
+/// O manifesto é fixo; a assinatura do artefato é conferida pelo plugin antes da instalação.
+const UPDATE_MANIFEST: &str = "https://github.com/JoaoAntonio08/call-dos-games/releases/latest/download/latest.json";
+
+fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let pubkey = option_env!("CDG_UPDATER_PUBKEY")
+        .filter(|key| !key.trim().is_empty())
+        .ok_or("Atualizações assinadas ainda não foram configuradas.")?;
+    let endpoint = Url::parse(UPDATE_MANIFEST).map_err(|_| "Endpoint de atualização inválido.")?;
+    app.updater_builder()
+        .pubkey(pubkey)
+        .endpoints(vec![endpoint]).map_err(|_| "Endpoint de atualização inválido.")?
+        .timeout(Duration::from_secs(30))
+        .build().map_err(|_| "Falha ao configurar o atualizador.".into())
+}
+
+#[cfg(windows)]
+fn confirmar_atualizacao(versao: &str) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_DEFBUTTON2, MB_ICONQUESTION, MB_YESNO};
+    let titulo: Vec<u16> = "Call dos Games — atualização assinada\0".encode_utf16().collect();
+    let mensagem: Vec<u16> = format!("Instalar a versão {versao} e reiniciar o aplicativo?\0").encode_utf16().collect();
+    unsafe { MessageBoxW(std::ptr::null_mut(), mensagem.as_ptr(), titulo.as_ptr(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES }
+}
+
+#[cfg(not(windows))]
+fn confirmar_atualizacao(_versao: &str) -> bool { false }
 
 /// Só baixa instalador das versões publicadas do projeto no GitHub.
 /// Login com Google abre na janelinha do próprio Google; o resto de fora vai para o navegador.
@@ -77,6 +104,7 @@ struct Estado {
     /// true quando a pessoa mandou fechar de vez (bandeja, atualização)
     fechando: AtomicBool,
     avisou_bandeja: AtomicBool,
+    atualizando: AtomicBool,
 }
 
 impl Estado {
@@ -271,16 +299,26 @@ fn criar_janela(app: &AppHandle, mostrar_agora: bool) -> tauri::Result<WebviewWi
 
 fn criar_bandeja(app: &AppHandle) -> tauri::Result<()> {
     let abrir = MenuItem::with_id(app, "abrir", "Abrir o Call dos Games", true, None::<&str>)?;
+    let atualizar = MenuItem::with_id(app, "atualizar", "Verificar atualização assinada", true, None::<&str>)?;
     let sair_call = MenuItem::with_id(app, "sair-call", "Sair da call", true, None::<&str>)?;
     let linha = PredefinedMenuItem::separator(app)?;
     let fechar = MenuItem::with_id(app, "fechar", "Fechar de vez", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&abrir, &sair_call, &linha, &fechar])?;
+    let menu = Menu::with_items(app, &[&abrir, &atualizar, &sair_call, &linha, &fechar])?;
     let mut t = TrayIconBuilder::with_id("bandeja")
         .tooltip("Call dos Games")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
             "abrir" => mostrar(app),
+            "atualizar" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    match instalar_atualizacao(&app).await {
+                        Ok(_) => (),
+                        Err(e) => avisar(&app, "Atualização", &e),
+                    }
+                });
+            }
             "sair-call" => {
                 let _ = app.emit("cdg:tray", "leave");
             }
@@ -504,8 +542,49 @@ fn cdg_devtools(window: WebviewWindow) {
 /* ------------------------------------------------------------------ atualização do próprio app */
 
 #[tauri::command]
-fn cdg_update() -> Result<String, String> {
-    Err("Atualizações automáticas desabilitadas até a configuração da assinatura.".into())
+async fn cdg_check_update(app: AppHandle, webview: Webview) -> Result<Option<String>, String> {
+    so_do_site(&webview, &app.state::<Estado>())?;
+    let update = updater(&app)?
+        .check().await.map_err(|_| "Falha ao consultar atualizações assinadas.")?;
+    Ok(update.map(|item| item.version))
+}
+
+async fn instalar_atualizacao(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<Estado>();
+    if state.atualizando.swap(true, SeqCst) {
+        return Err("Uma atualização já está em andamento.".into());
+    }
+    let result = async {
+        let update = updater(&app)?
+            .check().await.map_err(|_| "Falha ao consultar atualizações assinadas.")?
+            .ok_or_else(|| "Nenhuma atualização disponível.".to_string())?;
+        if !confirmar_atualizacao(&update.version) {
+            return Err("Atualização cancelada pela pessoa usuária.".into());
+        }
+        let progress_app = app.clone();
+        let mut downloaded = 0usize;
+        update.download_and_install(
+            move |chunk, total| {
+                downloaded = downloaded.saturating_add(chunk);
+                if let Some(total) = total.filter(|size| *size > 0) {
+                    let _ = progress_app.emit("cdg:update-progress", (downloaded as f64 / total as f64).min(1.0));
+                }
+            },
+            || {},
+        ).await.map_err(|_| "Falha ao verificar ou instalar a atualização assinada.")?;
+        Ok("instalando".to_string())
+    }.await;
+    state.atualizando.store(false, SeqCst);
+    if result.is_ok() {
+        app.restart();
+    }
+    result
+}
+
+#[tauri::command]
+async fn cdg_update(app: AppHandle, webview: Webview) -> Result<String, String> {
+    so_do_site(&webview, &app.state::<Estado>())?;
+    instalar_atualizacao(&app).await
 }
 
 /* ------------------------------------------------------------------ início */
@@ -535,6 +614,7 @@ fn main() {
         )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             cdg_site,
             cdg_app_prefs,
@@ -544,7 +624,8 @@ fn main() {
             cdg_notify,
             cdg_fullscreen,
             cdg_devtools,
-            cdg_update
+            cdg_update,
+            cdg_check_update
         ])
         .on_window_event(|w, ev| {
             if w.label() != "main" {
@@ -589,6 +670,7 @@ fn main() {
                 jogo: Mutex::new(None),
                 fechando: AtomicBool::new(false),
                 avisou_bandeja: AtomicBool::new(false),
+                atualizando: AtomicBool::new(false),
             });
             // o site (de fora do app) pode chamar os comandos acima e ouvir os eventos do app
             app.add_capability(
@@ -603,7 +685,8 @@ fn main() {
                     .permission("allow-cdg-notify")
                     .permission("allow-cdg-fullscreen")
                     .permission("allow-cdg-devtools")
-                    .permission("allow-cdg-update"),
+                    .permission("allow-cdg-update")
+                    .permission("allow-cdg-check-update"),
             )?;
             let h = app.handle().clone();
             aplicar_inicio(&h, prefs.startup);
@@ -611,6 +694,16 @@ fn main() {
             criar_janela(&h, !escondido)?;
             let _ = h.global_shortcut().register("alt+shift+c");
             vigiar_jogos(h);
+            if option_env!("CDG_UPDATER_PUBKEY").is_some() {
+                let h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(updater) = updater(&h) {
+                        if let Ok(Some(update)) = updater.check().await {
+                            avisar(&h, "Atualização disponível", &format!("Versão {} disponível. Use o menu da bandeja para instalar.", update.version));
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

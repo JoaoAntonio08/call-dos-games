@@ -25,7 +25,8 @@
       app: "windows",
       version: "tauri",
       appVersion: "__VERSAO__",
-      update: (url) => inv("cdg_update", { url }),
+      checkUpdate: () => inv("cdg_check_update"),
+      update: () => inv("cdg_update"),
       onUpdateProgress: (cb) => on("cdg:update-progress", cb),
       // jogo aberto no PC (só o nome do jogo reconhecido)
       onGame: (cb) => {
