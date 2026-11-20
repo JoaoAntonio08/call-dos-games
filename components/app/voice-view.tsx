@@ -27,7 +27,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { isUnread, useStore, useUser } from "@/lib/store";
+import { isUnread, nameInChannel, useNameInServer, useStore, useUser } from "@/lib/store";
 import { openModal, openUserMenu, toast, toggleUI, useUI } from "@/lib/ui";
 import { useVoice, type Spin, type Stroke } from "@/lib/voice";
 import { DEFAULT_SHARE, RESOLUTIONS, type Peer, type ShareSettings } from "@/lib/use-call";
@@ -249,7 +249,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
   const screens = call.peers.filter((p) => p.screen);
   const options = [
     ...(yt.state ? [{ id: "yt", label: "YouTube" }] : []),
-    ...screens.map((p) => ({ id: `s:${p.identity}`, label: p.isLocal ? "Sua tela" : `Tela de ${p.name}` })),
+    ...screens.map((p) => ({ id: `s:${p.identity}`, label: p.isLocal ? "Sua tela" : `Tela de ${nameInChannel(v.channelId, p.identity, p.name)}` })),
     ...(boardOpen ? [{ id: "board", label: "Quadro" }] : []),
     ...(rollOpen ? [{ id: "roll", label: "Roleta" }] : []),
   ];
@@ -557,7 +557,7 @@ function PipButton() {
 function Tile({ peer, compact, serverId }: { peer: Peer; compact?: boolean; serverId?: string }) {
   const v = useVoice();
   const user = useUser(peer.identity);
-  const name = user?.display_name ?? peer.name;
+  const name = useNameInServer(serverId, peer.identity, peer.name);
   const avatar = user?.avatar ?? peer.meta.avatar ?? null;
   const accent = user?.accent ?? peer.meta.accent ?? "#5865f2";
   const vol = v.voiceVol[peer.identity] ?? 1;

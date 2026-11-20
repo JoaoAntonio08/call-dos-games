@@ -13,9 +13,17 @@ import {
   Track,
   TrackEvent,
   VideoPresets,
+  type AudioCaptureOptions,
   type Participant,
   type VideoCodec,
 } from "livekit-client";
+
+/**
+ * Pede ao navegador para tirar do "som do PC" o que esta própria página toca.
+ * Sem isso, quem compartilha a tela com som manda de volta as vozes da call e todo mundo escuta eco.
+ * Chrome/Edge/WebView2 recentes entendem; os outros ignoram a opção (fica como antes).
+ */
+export const OWN_AUDIO_OFF = { restrictOwnAudio: true } as const;
 
 /* ------------------------------------------------------------------ */
 /* Qualidade do compartilhamento de tela                               */
@@ -414,9 +422,11 @@ export function useCall() {
       let tracks: LocalTrack[];
       try {
         tracks = await r.localParticipant.createScreenTracks({
-          // áudio da aba/sistema sem os filtros de voz, para música e efeitos saírem limpos
+          // áudio da aba/sistema sem os filtros de voz, para música e efeitos saírem limpos.
+          // restrictOwnAudio tira do som do PC o que o próprio Call dos Games toca (as vozes da call),
+          // senão quem fala escuta a própria voz de volta pelo compartilhamento (eco).
           audio: s.audio
-            ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 }
+            ? ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, ...OWN_AUDIO_OFF } as AudioCaptureOptions)
             : false,
           resolution: { width: res.width, height: res.height, frameRate: s.fps },
           contentHint: "motion",

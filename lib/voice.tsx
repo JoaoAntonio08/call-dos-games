@@ -3,8 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { RoomEvent, Track, type RemoteParticipant } from "livekit-client";
 import { api, upload } from "./api";
-import { gateway, loadQueue, setQueue, useStore } from "./store";
-import { useCall, type Call, type PeerMeta } from "./use-call";
+import { gateway, loadQueue, nameInChannel, setQueue, useNameInChannel, useStore } from "./store";
+import { OWN_AUDIO_OFF, useCall, type Call, type PeerMeta } from "./use-call";
 import { useYouTubeSync } from "./use-youtube-sync";
 import { useClipper } from "./clipper";
 import { toast } from "./ui";
@@ -184,6 +184,8 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     const srv = Object.values(s.servers).find((x) => x.channels.some((c) => c.id === channelId));
     return !srv || !!srv.my_perms?.includes("dj");
   });
+  // seu nome nesta call: o apelido do servidor, se tiver
+  const myName = useNameInChannel(channelId, me?.id, "Você");
   const yt = useYouTubeSync(call.room, call.flash, onEnded, isDj);
   const [joining, setJoining] = useState<string | null>(null);
   const [deaf, setDeafState] = useState(false);
@@ -524,7 +526,8 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       } catch {
         return;
       }
-      const name = p?.name || "Alguém";
+      // a sala do LiveKit chama "cdg-<id do canal>": o apelido vem do servidor desse canal
+      const name = p ? nameInChannel(room.name.replace(/^cdg-/, ""), p.identity, p.name || "Alguém") : "Alguém";
       if (topic === "sfx" && typeof msg.url === "string") {
         if (!deafRef.current) playUrl(msg.url, prefsRef.current.sfxVolume * (Number(msg.volume) || 1));
         pushReaction(String(msg.emoji || "🔊"), name);
@@ -556,17 +559,17 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     (s: Sound) => {
       publish("sfx", { url: s.url, volume: s.volume, emoji: s.emoji || "🔊", name: s.name });
       if (!deafRef.current) playUrl(s.url, prefsRef.current.sfxVolume * s.volume);
-      pushReaction(s.emoji || "🔊", me?.display_name ?? "Você");
+      pushReaction(s.emoji || "🔊", myName);
     },
-    [publish, pushReaction, me?.display_name],
+    [publish, pushReaction, myName],
   );
 
   const react = useCallback(
     (emoji: string) => {
       publish("react", { emoji });
-      pushReaction(emoji, me?.display_name ?? "Você");
+      pushReaction(emoji, myName);
     },
-    [publish, pushReaction, me?.display_name],
+    [publish, pushReaction, myName],
   );
 
   const addStroke = useCallback(
@@ -583,11 +586,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
 
   const startSpin = useCallback(
     (options: string[]) => {
-      const s: Spin = { id: Math.random().toString(36).slice(2), options, winner: Math.floor(Math.random() * options.length), by: me?.display_name ?? "Alguém", at: Date.now() };
+      const s: Spin = { id: Math.random().toString(36).slice(2), options, winner: Math.floor(Math.random() * options.length), by: myName, at: Date.now() };
       setSpin(s);
       publish("spin", s);
     },
-    [publish, me?.display_name],
+    [publish, myName],
   );
 
   /* ---------------- fila de vídeos ---------------- */
@@ -601,7 +604,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     async (item: QueueItem) => {
       if (!channelId) return;
       // a música continua sendo de quem pôs na fila (é essa pessoa que pausa e pula)
-      const owner = item.added_by ? { id: item.added_by, name: useStore.getState().users[item.added_by]?.display_name ?? "Alguém" } : undefined;
+      const owner = item.added_by ? { id: item.added_by, name: nameInChannel(channelId, item.added_by) } : undefined;
       ytLoad(`https://www.youtube.com/watch?v=${item.video_id}&t=${item.start}s`, owner);
       try {
         setQueue(channelId, await api<QueueItem[]>(`/queue/${item.id}?played=1`, { method: "DELETE" }));
@@ -702,7 +705,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, height: { ideal: 1080 } }, audio: true });
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, height: { ideal: 1080 } }, audio: OWN_AUDIO_OFF as MediaTrackConstraints });
       setOwnScreen(s);
       toast("Gravando sua tela só para clipes. Ninguém está vendo. Alt+C salva o lance.");
     } catch {
@@ -719,7 +722,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     extraAudio: useOwn ? ownScreen!.getAudioTracks() : [],
   });
   const clipperClip = clipper.clip;
-  const sharerName = sharer ? (sharer.isLocal ? me?.display_name : sharer.name) : useOwn ? me?.display_name : undefined;
+  const sharerName = sharer ? (sharer.isLocal ? myName : nameInChannel(channelId, sharer.identity, sharer.name)) : useOwn ? myName : undefined;
   const saveClip = useCallback(async () => {
     if (!channelId) return;
     const res = await clipperClip();
@@ -754,11 +757,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       // no app de Windows o atalho funciona com o jogo na frente: o sininho avisa que salvou
       if (document.hidden || !document.hasFocus()) chime("ping", prefs.sfxVolume * 0.6);
       publish("react", { emoji: "🎬" });
-      pushReaction("🎬", me?.display_name ?? "Você");
+      pushReaction("🎬", myName);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Não deu para salvar o clipe.");
     }
-  }, [channelId, clipperClip, sharerName, publish, pushReaction, me?.display_name, prefs.sfxVolume]);
+  }, [channelId, clipperClip, sharerName, publish, pushReaction, myName, prefs.sfxVolume]);
   const clip = useMemo(
     () => ({
       available: clipper.ready,

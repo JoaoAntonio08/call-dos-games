@@ -28,6 +28,7 @@ async def test_voice_token_is_short_lived_and_cannot_publish_to_read_only_channe
         lambda user: {"display_name": "Synthetic", "avatar": None, "accent": "#000000", "username": "synthetic", "join_sound": None},
     )
     monkeypatch.setattr(voz, "mods_of", lambda server_id, user_id: async_value({"mute": False, "deaf": False, "noshare": False}))
+    monkeypatch.setattr(session, "pool", lambda: SimpleNamespace(fetchval=lambda *a: async_value(None)))
 
     result = await session.voice_token(session.VoiceIn(channel_id="9"), Auth(42, 1))
     claims = jwt.decode(result["token"], settings.livekit_secret, algorithms=["HS256"], options={"verify_aud": False})
@@ -36,6 +37,42 @@ async def test_voice_token_is_short_lived_and_cannot_publish_to_read_only_channe
     assert claims["video"]["room"] == "cdg-9"
     assert claims["video"]["canPublish"] is False
     assert claims["video"]["canPublishData"] is False
+    assert claims["name"] == "Synthetic"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("server_id", "nick", "expected"), [(5, "Apelido", "Apelido"), (5, "", "Synthetic"), (None, "Apelido", "Synthetic")])
+async def test_voice_token_uses_server_nickname(monkeypatch, server_id, nick, expected):
+    monkeypatch.setattr(settings, "livekit_url", "wss://voice.test")
+    monkeypatch.setattr(settings, "livekit_key", "key")
+    monkeypatch.setattr(settings, "livekit_secret", "test-livekit-secret-that-is-long-enough")
+    ctype = "voice" if server_id else "dm"
+    monkeypatch.setattr(
+        session,
+        "can_access_channel",
+        lambda user_id, channel_id: async_value({"id": channel_id, "type": ctype, "server_id": server_id, "can_send": True}),
+    )
+    monkeypatch.setattr(session, "fetch_user", lambda user_id: async_value({"id": user_id}))
+    monkeypatch.setattr(
+        session,
+        "user_out",
+        lambda user: {"display_name": "Synthetic", "avatar": None, "accent": "#000000", "username": "synthetic", "join_sound": None},
+    )
+    monkeypatch.setattr(voz, "mods_of", lambda server_id, user_id: async_value({"mute": False, "deaf": False, "noshare": False}))
+    asked = []
+
+    def fetchval(query, *args):
+        asked.append(args)
+        return async_value(nick)
+
+    monkeypatch.setattr(session, "pool", lambda: SimpleNamespace(fetchval=fetchval))
+
+    result = await session.voice_token(session.VoiceIn(channel_id="9"), Auth(42, 1))
+    claims = jwt.decode(result["token"], settings.livekit_secret, algorithms=["HS256"], options={"verify_aud": False})
+
+    assert claims["name"] == expected
+    # conversa direta não tem servidor: nem consulta apelido
+    assert asked == ([(server_id, 42)] if server_id else [])
 
 
 @pytest.mark.asyncio

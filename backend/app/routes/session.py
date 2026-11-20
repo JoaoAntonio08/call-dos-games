@@ -72,6 +72,12 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
     from .voz import mods_of, publish_sources  # aqui para não dar ciclo
 
     mods = await mods_of(ch["server_id"], me.id)
+    # na call de um servidor vale o apelido de lá (como no chat)
+    nick = (
+        await pool().fetchval("SELECT nickname FROM members WHERE server_id = $1 AND user_id = $2", ch["server_id"], me.id)
+        if ch.get("server_id")
+        else None
+    )
     grant: dict = {
         "room": f"cdg-{cid}",
         "roomJoin": True,
@@ -89,7 +95,7 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
     claims = {
         "iss": settings.livekit_key,
         "sub": str(me.id),
-        "name": profile["display_name"],
+        "name": nick or profile["display_name"],
         "nbf": now - 10,
         "exp": now + settings.livekit_token_ttl,
         # o resto da call lê foto, cor e som de entrada daqui

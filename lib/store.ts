@@ -89,6 +89,35 @@ function rememberUsers(list: (User | null | undefined)[], into: Record<string, U
   return into;
 }
 
+type NameState = Pick<State, "servers" | "users" | "me">;
+
+/** Nome de alguém dentro de uma call: o apelido do servidor do canal, se tiver; senão o nome de exibição. */
+function pickName(s: NameState, channelId: string | null | undefined, userId: string, fallback?: string): string {
+  const srv = channelId ? Object.values(s.servers).find((x) => x.channels.some((c) => c.id === channelId)) : undefined;
+  return nickOrName(s, srv?.id, userId, fallback);
+}
+
+function nickOrName(s: NameState, serverId: string | null | undefined, userId: string, fallback?: string): string {
+  const nick = serverId ? s.servers[serverId]?.members.find((m) => m.user.id === userId)?.nickname : undefined;
+  const u = s.users[userId] ?? (s.me?.id === userId ? s.me : null);
+  return nick || u?.display_name || fallback || "Alguém";
+}
+
+/** Nome da pessoa no servidor do canal (fora de componente). */
+export function nameInChannel(channelId: string | null | undefined, userId: string, fallback?: string): string {
+  return pickName(get(), channelId, userId, fallback);
+}
+
+/** Nome da pessoa no servidor do canal, atualizando quando o apelido muda. */
+export function useNameInChannel(channelId: string | null | undefined, userId: string | null | undefined, fallback?: string): string {
+  return useStore((s) => (userId ? pickName(s, channelId, userId, fallback) : (fallback ?? "Alguém")));
+}
+
+/** Nome da pessoa num servidor, atualizando quando o apelido muda. */
+export function useNameInServer(serverId: string | null | undefined, userId: string | null | undefined, fallback?: string): string {
+  return useStore((s) => (userId ? nickOrName(s, serverId, userId, fallback) : (fallback ?? "Alguém")));
+}
+
 /** Usuário com a presença mais recente. */
 export function useUser(id: string | null | undefined): User | null {
   return useStore((s) => {

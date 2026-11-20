@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { BellOff, ChevronDown, Hash, HeadphoneOff, LogOut, MicOff, Music2, PartyPopper, Pause, Plus, Settings, Trophy, TvMinimalPlay, UserPlus, Users, Video, Volume2 } from "lucide-react";
 import { api, errorText } from "@/lib/api";
-import { isUnread, markRead, useStore, useUser, usePresence } from "@/lib/store";
+import { isUnread, markRead, useNameInServer, useStore, useUser, usePresence } from "@/lib/store";
 import { openModal, openProfile, openUserMenu, toast, type ServerPage } from "@/lib/ui";
 import { useVoice } from "@/lib/voice";
 import type { Channel, Dm, NowPlaying, Server, VoiceMember } from "@/lib/types";
@@ -312,6 +312,7 @@ function VoiceMemberRow({ m, serverId }: { m: VoiceMember; serverId: string }) {
   const server = useStore((s) => s.servers[serverId]);
   const game = useStore((s) => s.games[m.user_id]);
   const speaking = v.call.peers.find((p) => p.identity === m.user_id)?.speaking;
+  const name = useNameInServer(serverId, m.user_id);
   if (!user) return null;
   // você pode se arrastar para outra sala; admin arrasta os outros
   const canDrag = m.user_id === me?.id || canModerate(server, me?.id, m.user_id);
@@ -325,8 +326,8 @@ function VoiceMemberRow({ m, serverId }: { m: VoiceMember; serverId: string }) {
         title={game ? `Jogando ${game.name}` : undefined}
         className="group flex h-8 w-full items-center gap-2 rounded-[8px] px-1.5 text-left text-[13.5px] text-oat/70 hover:bg-cocoa-3 hover:text-oat"
       >
-        <Avatar name={user.display_name} avatar={user.avatar} accent={user.accent} size={22} ring={speaking ? "var(--color-moss)" : undefined} />
-        <span className="min-w-0 flex-1 truncate">{user.display_name}</span>
+        <Avatar name={name} avatar={user.avatar} accent={user.accent} size={22} ring={speaking ? "var(--color-moss)" : undefined} />
+        <span className="min-w-0 flex-1 truncate">{name}</span>
         {m.stream && <span className="rounded-[5px] bg-rust px-1 text-[9.5px] font-bold uppercase tracking-wide text-oat">ao vivo</span>}
         {m.video && <Video className="size-3.5 opacity-60" />}
         {m.sdeaf ? (
