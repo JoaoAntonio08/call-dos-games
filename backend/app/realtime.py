@@ -166,6 +166,9 @@ class Hub:
             if not self.voice.get(old):
                 self.voice.pop(old, None)
                 await self.set_music(old, None)  # call vazia: o DJ sai junto
+                from .routes import radio  # aqui para não dar ciclo
+
+                radio.reset(old)  # e o rádio recomeça do zero (e ligado) na próxima
             await self._announce_voice(old)
             self.user_voice.pop(user_id, None)
         if channel_id is not None:

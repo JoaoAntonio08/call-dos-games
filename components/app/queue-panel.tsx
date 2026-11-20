@@ -109,6 +109,8 @@ export function QueuePanel({ onClose, onPlaying }: { onClose: () => void; onPlay
 function QueueRow({ item, first, channelId, dj, onPlay }: { item: QueueItem; first: boolean; channelId: string; dj: boolean; onPlay?: () => void }) {
   const me = useStore((s) => s.me);
   const mine = !!me && item.added_by === me.id;
+  // sem dono = o rádio da call escolheu (qualquer um da call pode tirar)
+  const radio = !item.added_by;
   const who = useUser(item.added_by ?? undefined);
   const voted = !!me && item.voters.includes(me.id);
 
@@ -133,7 +135,7 @@ function QueueRow({ item, first, channelId, dj, onPlay }: { item: QueueItem; fir
         <p className="truncate text-[11.5px] text-oat/40">
           {first && <span className="font-semibold text-ember-2">a seguir · </span>}
           {item.author ? `${item.author} · ` : ""}
-          {who ? `pôs ${who.display_name}` : ""}
+          {who ? `pôs ${who.display_name}` : radio ? "📻 rádio da call" : ""}
         </p>
       </div>
       <button
@@ -148,7 +150,7 @@ function QueueRow({ item, first, channelId, dj, onPlay }: { item: QueueItem; fir
         <ChevronUp className="size-4" />
         {item.voters.length}
       </button>
-      {(mine || dj) && (
+      {(mine || dj || radio) && (
       <button
         type="button"
         onClick={() => void call(`/queue/${item.id}`, "DELETE")}

@@ -260,7 +260,11 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
   const current = stage ?? "grid";
   const stagePeer = stage?.startsWith("s:") ? screens.find((p) => `s:${p.identity}` === stage) : undefined;
 
-  const sounds = useStore((s) => (server ? server.sounds : Object.values(s.servers).flatMap((x) => x.sounds)));
+  // na call de conversa privada não tem servidor: usa os sons de todos os seus servidores.
+  // O seletor devolve só a referência estável; a lista nova sai do useMemo (senão o zustand
+  // vê "mudou" a cada leitura e o React entra em loop: erro #185, a página não carrega).
+  const allServers = useStore((s) => (server ? null : s.servers));
+  const sounds = useMemo(() => (server ? server.sounds : Object.values(allServers ?? {}).flatMap((x) => x.sounds)), [server, allServers]);
 
   const n = call.peers.length;
   const cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;

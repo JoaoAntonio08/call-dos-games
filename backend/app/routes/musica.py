@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from ..core import Auth, CurrentUser, err, fetch_user, new_id, parse_id, pool, settings, sid
 from ..perms import Member, member as perms_member
 from ..realtime import hub
+from . import radio
 from .extras import announce_queue, parse_youtube, youtube_info
 
 YOUTUBE_BASE = os.environ.get("YOUTUBE_API_BASE", "https://www.googleapis.com").rstrip("/")
@@ -103,8 +104,10 @@ async def now_playing(body: NowPlayingIn, me: Auth = CurrentUser) -> dict:
     else:
         owner = hub.consume_expected_music(cid, vid) or me.id
     who = await fetch_user(owner)
-    if not current or current["video_id"] != vid:
+    new_song = not current or current["video_id"] != vid
+    if new_song:
         hub.music_controllers[cid] = me.id
+    from_radio = radio.picked.get(cid) == vid
     await hub.set_music(
         cid,
         {
@@ -112,10 +115,14 @@ async def now_playing(body: NowPlayingIn, me: Auth = CurrentUser) -> dict:
             "title": title or "Vídeo do YouTube",
             "author": author,
             "owner_id": sid(owner),
-            "owner_name": (who or {}).get("display_name") or "Alguém",
+            "owner_name": radio.RADIO_NAME if from_radio else ((who or {}).get("display_name") or "Alguém"),
             "playing": body.playing,
         },
     )
+    if new_song:
+        # rádio da call: lembra o que tocou e, se a fila acabou, já escolhe a próxima na mesma vibe
+        radio.remember(cid, vid, title, author)
+        radio.schedule_fill(cid)
     return {"ok": True}
 
 
@@ -179,6 +186,12 @@ async def music_command(name: str, args: str, ch: dict, user_id: int, who: Membe
         lines = [f"{i + 1}. {x['title']}" for i, x in enumerate(items[:10])]
         more = f"\n…e mais {len(items) - 10}" if len(items) > 10 else ""
         return "🎵 Fila:\n" + "\n".join(lines) + more
+    if name == "radio":
+        if vc is None:
+            return "📻 Entre numa call para ligar ou desligar o rádio dela."
+        if not settings.youtube_key:
+            return "📻 O rádio precisa da busca do YouTube ligada neste servidor (falta a chave do YouTube)."
+        return await radio.radio_command(args, vc)
     if name == "pular":
         if vc is None:
             return "🎵 Entre na call onde a música está tocando."
