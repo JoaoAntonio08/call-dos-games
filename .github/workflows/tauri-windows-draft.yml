@@ -56,3 +56,27 @@ jobs:
           releaseDraft: true
           args: --config ${{ runner.temp }}/updater.conf.json
           prerelease: false
+      - name: Point latest.json to the public download URL
+        # em rascunho o tauri-action grava o endereço da API (assets/<id>); o canal de atualização
+        # e o Promote exigem o link público da release versionada (válido assim que ela for publicada)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $version = (Get-Content desktop-tauri/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = "desktop-v$version"
+          $dir = Join-Path $env:RUNNER_TEMP 'manifest'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          gh release download $tag --pattern latest.json --dir $dir --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download draft manifest' }
+          $release = gh release view $tag --json assets | ConvertFrom-Json
+          $installers = @($release.assets | Where-Object { $_.name -match '_x64-setup\.exe$' })
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer in the draft' }
+          $url = "https://github.com/$env:GH_REPO/releases/download/$tag/$($installers[0].name)"
+          $file = Join-Path $dir 'latest.json'
+          $manifest = Get-Content $file -Raw | ConvertFrom-Json
+          foreach ($platform in $manifest.platforms.PSObject.Properties) { $platform.Value.url = $url }
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content $file -Encoding utf8NoBOM
+          gh release upload $tag $file --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot update draft manifest' }
