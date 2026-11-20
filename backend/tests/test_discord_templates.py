@@ -38,6 +38,12 @@ def test_category_visibility_and_voice_limit():
     assert by_id["3"]["user_limit"] == 4
 
 
+def test_private_category_without_channel_overwrites_is_blocked():
+    data = sample(private=True)
+    data["serialized_source_guild"]["channels"][1]["permission_overwrites"] = []
+    assert next(c for c in templates.preview(data)["channels"] if c["id"] == "2")["private"]
+
+
 @pytest.mark.asyncio
 async def test_preview_requires_admin_before_discord_request(monkeypatch):
     async def deny(*args):
@@ -59,9 +65,12 @@ async def test_discord_api_errors_and_fixed_destination(monkeypatch):
             return self
         async def __aexit__(self, *args):
             pass
-        async def get(self, url):
+        def stream(self, method, url):
             seen.append(url)
-            return httpx.Response(404)
+            return self
+        @property
+        def status_code(self):
+            return 404
     monkeypatch.setattr(templates.httpx, "AsyncClient", lambda **kwargs: Client())
     with pytest.raises(HTTPException) as exc:
         await templates.fetch_template("abc123")
@@ -89,6 +98,8 @@ class Connection:
     async def fetch(self, *args):
         return self.existing
     async def fetchval(self, query, *args):
+        if "FROM members" in query:
+            return "admin"
         return 1 if self.linked else None
 
 

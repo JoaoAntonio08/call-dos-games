@@ -940,6 +940,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
     ...(admin
       ? ([
           ["canais", "Canais"],
+          ["modelo", "Importar modelo"],
           ["cargos", "Cargos"],
           ["membros", "Membros"],
           ["bots", "Bots"],
@@ -956,6 +957,7 @@ function ServerSettings({ server, tab: initial }: { server: Server; tab?: string
       {tab === "sons" && <SoundsTab server={server} admin={admin} />}
       {tab === "emojis" && <EmojisTab server={server} admin={admin} />}
       {tab === "canais" && <ChannelsTab server={server} />}
+      {tab === "modelo" && <DiscordTemplateTab server={server} />}
       {tab === "membros" && <MembersTab server={server} owner={role === "owner"} />}
       {tab === "cargos" && <RolesTab server={server} />}
       {tab === "bots" && <BotBuilder server={server} />}
@@ -1287,6 +1289,109 @@ function ChannelsTab({ server }: { server: Server }) {
           <ChannelRow key={c.id} server={server} id={c.id} name={c.name} topic={c.topic} type={c.type} limit={c.user_limit ?? 0} />
         ))}
       </div>
+    </div>
+  );
+}
+
+type TemplateChannel = {
+  id: string;
+  name: string;
+  type: "text" | "voice";
+  category: string;
+  category_position: number;
+  position: number;
+  private: boolean;
+  user_limit: number;
+};
+
+type TemplatePreview = { name: string; fingerprint: string; channels: TemplateChannel[] };
+
+function DiscordTemplateTab({ server }: { server: Server }) {
+  const [code, setCode] = useState("");
+  const [preview, setPreview] = useState<TemplatePreview | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [mode, setMode] = useState<"add" | "replace">("add");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+  const groups = preview ? Array.from(new Set(preview.channels.map((channel) => channel.category))) : [];
+
+  async function load() {
+    setBusy(true);
+    setError("");
+    setResult("");
+    setPreview(null);
+    try {
+      const data = await api<TemplatePreview>(`/servers/${server.id}/discord-template/preview`, { json: { template: code } });
+      setPreview(data);
+      setSelected(data.channels.filter((channel) => !channel.private).map((channel) => channel.id));
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runImport() {
+    if (!preview || selected.length === 0) return;
+    const confirmation = mode === "replace"
+      ? `Substituir os ${server.channels.length} canais atuais de ${server.name}? A operação será recusada se houver mensagens, vínculos ou permissões próprias.`
+      : `Adicionar ${selected.length} canais a ${server.name}?`;
+    if (!confirm(confirmation)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const outcome = await api<{ created: number; skipped: number }>(`/servers/${server.id}/discord-template/import`, {
+        json: { template: code, selected, mode, fingerprint: preview.fingerprint },
+      });
+      setResult(`Criados ${outcome.created} canais. Já existentes ${outcome.skipped}.`);
+      toast("Importação concluída.");
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="max-w-xl space-y-4">
+      <H>Importar modelo do Discord</H>
+      <p className="text-[13px] text-oat/60">Cole um link discord.new ou código. Categorias aparecem na prévia, mas os canais serão criados na lista do servidor.</p>
+      <div className="flex gap-2">
+        <input className="field flex-1" value={code} onChange={(event) => { setCode(event.target.value); setPreview(null); }} placeholder="https://discord.new/..." aria-label="Link ou código do modelo" />
+        <button type="button" className="btn-ember px-4" disabled={busy || !code.trim()} onClick={() => void load()}>Ver prévia</button>
+      </div>
+      {preview && (
+        <>
+          <p className="text-[13px] text-oat/70">{preview.name} · {preview.channels.length} canais. Canais privados ficam bloqueados.</p>
+          <div className="max-h-72 space-y-4 overflow-y-auto">
+            {groups.map((category) => (
+              <div key={category || "sem-categoria"}>
+                <h3 className="mb-1 text-[13px] font-semibold text-oat">{category || "Sem categoria"}</h3>
+                {preview.channels.filter((channel) => channel.category === category).map((channel) => (
+                  <label key={channel.id} className="flex items-center gap-2 py-1 text-[13px] text-oat/75">
+                    <input type="checkbox" disabled={channel.private} checked={selected.includes(channel.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, channel.id] : current.filter((id) => id !== channel.id))} />
+                    <span>{channel.type === "text" ? "#" : "🔊"} {channel.name}</span>
+                    {channel.user_limit > 0 && <span>· limite {channel.user_limit}</span>}
+                    {channel.private && <span className="text-rust">Privado no Discord</span>}
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 text-[13px] text-oat">
+            Modo
+            <select className="field" value={mode} onChange={(event) => setMode(event.target.value as "add" | "replace")}>
+              <option value="add">Adicionar sem duplicar</option>
+              <option value="replace">Substituir canais vazios</option>
+            </select>
+          </label>
+          <p className="text-[13px] text-oat/60">{selected.length} selecionados. {mode === "replace" ? `${server.channels.length} canais atuais serão verificados antes da substituição.` : "Canais existentes com o mesmo nome serão preservados."}</p>
+          <button type="button" className="btn-ember px-4" disabled={busy || selected.length === 0} onClick={() => void runImport()}>{busy ? "Aguarde…" : "Confirmar importação"}</button>
+        </>
+      )}
+      {error && <p role="alert" className="text-[13px] text-rust">{error}</p>}
+      {result && <p role="status" className="text-[13px] text-oat">{result}</p>}
     </div>
   );
 }

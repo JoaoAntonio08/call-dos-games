@@ -43,14 +43,17 @@ def code_of(value: str) -> str:
 async def fetch_template(code: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
-            response = await client.get(f"https://discord.com/api/v10/guilds/templates/{code}")
-        if response.status_code == 404:
-            raise err(404, "Modelo não encontrado.")
-        if response.status_code != 200:
-            raise err(502, "Discord indisponível.")
-        if len(response.content) > 512_000:
-            raise err(502, "Modelo grande demais.")
-        data = response.json()
+            async with client.stream("GET", f"https://discord.com/api/v10/guilds/templates/{code}") as response:
+                if response.status_code == 404:
+                    raise err(404, "Modelo não encontrado.")
+                if response.status_code != 200:
+                    raise err(502, "Discord indisponível.")
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > 512_000:
+                        raise err(502, "Modelo grande demais.")
+        data = json.loads(content)
         if not isinstance(data, dict):
             raise ValueError("invalid template")
         return data
@@ -142,7 +145,9 @@ async def import_template(server_id: str, body: ImportIn, me: Auth = CurrentUser
     async with pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock($1)", server)
-            await require_admin(server, me.id)
+            role = await conn.fetchval("SELECT role FROM members WHERE server_id = $1 AND user_id = $2", server, me.id)
+            if role not in ("owner", "admin"):
+                raise err(403, "Só admins podem fazer isso.")
             existing = await conn.fetch("SELECT id, name, type, position, view_roles, send_roles FROM channels WHERE server_id = $1 ORDER BY position", server)
             if body.mode == "replace" and existing:
                 if any(r["view_roles"] or r["send_roles"] for r in existing):
