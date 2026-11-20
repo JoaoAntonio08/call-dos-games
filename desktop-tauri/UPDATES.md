@@ -1,7 +1,17 @@
-# Atualizações Windows
+# Atualizações do cliente Windows
 
-O comando de atualização do cliente retorna um erro até o projeto configurar a assinatura. O cliente novo não baixa ou executa instaladores por esse comando. Clientes antigos precisam de substituição por um instalador obtido por um canal confiável.
+O cliente 2.0.1 consulta o manifesto fixo `https://github.com/JoaoAntonio08/call-dos-games/releases/latest/download/latest.json`. O plugin oficial do Tauri 2 compara versões e exige assinatura válida do instalador antes de instalar. O site não fornece URLs ao atualizador nativo. A verificação ocorre na abertura; o menu da bandeja permite verificar e instalar manualmente. A instalação pede confirmação em uma janela nativa do Windows. Só o site configurado pode chamar os comandos nativos. O progresso também é enviado à interface web existente.
 
-Para habilitar o [updater oficial do Tauri 2](https://v2.tauri.app/plugin/updater/), configure a chave pública do projeto em `plugins.updater.pubkey` e um endpoint HTTPS fixo do projeto. Guarde a chave privada exclusivamente nos segredos do processo de publicação. Gere os bundles com `bundle.createUpdaterArtifacts`, publique os artefatos assinados junto com os metadados esperados pelo plugin e faça a verificação e instalação pelo plugin nativo.
+Sem `CDG_UPDATER_PUBKEY` no **build** do cliente, a atualização permanece desativada. O código nunca aceita instalador sem assinatura. Isso é intencional até a chave e a publicação estarem prontas.
 
-Antes de publicar, teste no Windows uma atualização válida e confirme a rejeição de um artefato adulterado, de uma assinatura ausente e de uma assinatura feita com outra chave.
+## Preparação da assinatura
+
+1. O proprietário autoriza a criação de um par de chaves exclusivo do updater. Gerar com o Tauri CLI `tauri signer generate`, fora do repositório. Fazer cópia protegida da chave privada; sua perda impede futuras atualizações dos clientes que confiam nessa chave.
+2. Guardar a chave privada no segredo `TAURI_SIGNING_PRIVATE_KEY` do ambiente GitHub `windows-updater` e a senha, se houver, em `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Colocar **somente** a chave pública em `CDG_UPDATER_PUBKEY` como variável do repositório. Não guardar chaves em commits ou logs.
+3. Proteger o ambiente `windows-updater` com aprovação de publicação. Rodar a verificação de Windows no PR. Depois do merge, disparar manualmente `Build signed Windows draft` na `main`.
+4. O workflow cria apenas uma release **rascunho**. Conferir versão 2.0.1, instalador NSIS, artefato updater, arquivo `.sig`, conteúdo e URLs de `latest.json`. Conferir que a chave pública embutida no executável corresponde à privada que assinou o artefato.
+5. Testar em uma VM Windows isolada: atualização válida, manifesto inválido, artefato adulterado, assinatura ausente/incorreta, versão igual/inferior, falha de rede, download interrompido, confirmação negada e instalação/reinício. Só publicar a release depois dessas verificações e aprovação do proprietário.
+
+O cliente 2.0.0 anterior tem o atualizador inseguro desativado. Ele não receberá a versão 2.0.1 automaticamente; usuários existentes devem instalar manualmente o primeiro cliente assinado a partir de um canal confiável. Não reativar o fluxo antigo para essa transição.
+
+Não usar build Linux como evidência de funcionamento do instalador Windows. O workflow de PR verifica a compilação e testes Rust no Windows; a assinatura e instalação precisam do teste separado acima.

@@ -1,7 +1,7 @@
 {
   "name": "call-dos-games-tauri",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "App de Windows do Call dos Games em Rust (Tauri)",
   "scripts": {
     "tauri": "tauri",

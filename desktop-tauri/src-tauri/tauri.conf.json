@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Call dos Games",
   "mainBinaryName": "Call dos Games",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "identifier": "com.calldosgames.desktop",
   "build": {
     "frontendDist": "../dist"
@@ -16,6 +16,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis"],
     "publisher": "Call dos Games",
     "shortDescription": "App de Windows do Call dos Games",

@@ -10,6 +10,7 @@ const COMANDOS: &[&str] = &[
     "cdg_fullscreen",
     "cdg_devtools",
     "cdg_update",
+    "cdg_check_update",
 ];
 
 fn main() {
