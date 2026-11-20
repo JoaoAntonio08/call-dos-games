@@ -30,6 +30,15 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:CDG_UPDATER_PUBKEY)) { throw 'Updater public key missing' }
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Updater signing key missing' }
+      - name: Pass updater public key to the bundler
+        # o bundler do Tauri exige plugins.updater.pubkey para gerar os artefatos do updater;
+        # a chave pública vem da variável do repositório e não fica no código
+        shell: pwsh
+        env:
+          CDG_UPDATER_PUBKEY: ${{ vars.CDG_UPDATER_PUBKEY }}
+        run: |
+          $conf = @{ plugins = @{ updater = @{ pubkey = $env:CDG_UPDATER_PUBKEY.Trim() } } } | ConvertTo-Json -Depth 5
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP 'updater.conf.json') -Value $conf -Encoding utf8NoBOM
       - name: Install desktop dependencies
         run: npm ci
         working-directory: desktop-tauri
@@ -45,4 +54,5 @@ jobs:
           tagName: desktop-v__VERSION__
           releaseName: Call dos Games Desktop v__VERSION__
           releaseDraft: true
+          args: --config ${{ runner.temp }}/updater.conf.json
           prerelease: false
