@@ -11,7 +11,7 @@ Como funciona:
 from __future__ import annotations
 
 import asyncio
-import io
+import tempfile
 import json
 import logging
 import random
@@ -45,6 +45,9 @@ ADMIN_BITS = 8 | 16 | 32  # Administrador, Gerenciar canais, Gerenciar servidor
 
 MAX_FILE = 10 * 1024 * 1024  # webhook do Discord sem impulso aceita até 10 MB
 MAX_FILES = 5
+WORKERS = 2
+QUEUE_CAPACITY = 16
+JOB_TIMEOUT = 60
 CODE_TTL = 600
 
 
@@ -64,12 +67,44 @@ class _Ponte:
         self.by_channel: dict[int, dict] = {}  # canal daqui -> ligação
         self.codes: dict[str, tuple[int, int, float]] = {}  # código -> (canal daqui, quem gerou, validade)
         self.locks: dict[int, asyncio.Lock] = {}
-        self.tasks: set[asyncio.Task] = set()
+        self.queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_CAPACITY)
+        self.workers: list[asyncio.Task] = []
+        self.active = 0
+        self.dropped = 0
 
-    def spawn(self, coro: Any) -> None:
-        t = asyncio.create_task(coro)
-        self.tasks.add(t)
-        t.add_done_callback(self.tasks.discard)
+    def submit(self, job: Any, *args: Any) -> None:
+        try:
+            if self.workers:
+                self.queue.put_nowait((job, args))
+                return
+        except asyncio.QueueFull:
+            pass
+        self.dropped += 1
+        if self.dropped & (self.dropped - 1) == 0:
+            log.warning("ponte: ativos=%d fila=%d descartes=%d", self.active, self.queue.qsize(), self.dropped)
+
+    async def work(self) -> None:
+        while True:
+            job, args = await self.queue.get()
+            self.active += 1
+            try:
+                async with asyncio.timeout(JOB_TIMEOUT):
+                    await job(*args)
+            except Exception as exc:
+                log.warning("ponte: trabalho falhou (%s)", type(exc).__name__)
+            finally:
+                self.active -= 1
+                self.queue.task_done()
+
+    async def stop(self) -> None:
+        workers, self.workers = self.workers, []
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        while not self.queue.empty():
+            self.queue.get_nowait()
+            self.queue.task_done()
+            self.dropped += 1
 
     def invite_url(self) -> str:
         if not self.bot_id:
@@ -131,6 +166,7 @@ async def discord_loop() -> None:
     wait = 2.0
     while True:
         try:
+            ponte.workers = [asyncio.create_task(ponte.work()) for _ in range(WORKERS)]
             await _session()
             wait = 2.0
         except asyncio.CancelledError:
@@ -142,6 +178,8 @@ async def discord_loop() -> None:
         except Exception as e:
             ponte.status, ponte.erro = "reconectando", f"{type(e).__name__}: {e}"[:200]
             log.warning("ponte com o Discord caiu: %s", ponte.erro)
+        finally:
+            await ponte.stop()
         await asyncio.sleep(wait + random.random())
         wait = min(wait * 2, 120)
 
@@ -244,7 +282,8 @@ def _dispatch(t: str, d: dict) -> None:
         if g:
             g["channels"][str(d["id"])] = d.get("name") or ""
     elif t == "MESSAGE_CREATE":
-        ponte.spawn(_on_discord_message(d))
+        if str(d.get("channel_id")) in ponte.links or (d.get("content") or "").lstrip().lower().startswith("!ponte"):
+            ponte.submit(_on_discord_message, d)
 
 
 def _is_discord_admin(d: dict) -> bool:
@@ -382,16 +421,19 @@ async def _download(url: str, name: str, owner_id: int | None) -> dict | None:
     if owner_id is None or urlparse(url).scheme not in ("https", "http") or host not in CDN_HOSTS:
         return None
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as c:
-            async with c.stream("GET", url) as r:
-                if r.status_code != 200:
-                    return None
-                buf = bytearray()
-                async for chunk in r.aiter_bytes():
-                    buf += chunk
-                    if len(buf) > MAX_FILE:
+        with tempfile.TemporaryFile() as spool:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=False) as c:
+                async with c.stream("GET", url, headers={"Accept-Encoding": "identity"}) as r:
+                    if r.status_code != 200 or r.headers.get("content-encoding", "identity") != "identity":
                         return None
-        return await save_upload(UploadFile(file=io.BytesIO(bytes(buf)), filename=name[:120] or "arquivo"), "attachment", owner_id)
+                    size = 0
+                    async for chunk in r.aiter_raw(chunk_size=64 * 1024):
+                        size += len(chunk)
+                        if size > MAX_FILE:
+                            return None
+                        spool.write(chunk)
+            spool.seek(0)
+            return await save_upload(UploadFile(file=spool, filename=name[:120] or "arquivo"), "attachment", owner_id)
     except HTTPException:
         return None  # cota cheia ou arquivo recusado
     except Exception:
@@ -431,7 +473,7 @@ def on_app_message(channel_id: int, msg: dict) -> None:
     """Chamado quando alguém manda mensagem aqui: se o canal tem ponte, manda para o Discord."""
     link = ponte.by_channel.get(channel_id)
     if link and TOKEN:
-        ponte.spawn(_to_discord(link, msg))
+        ponte.submit(_to_discord, link, msg)
 
 
 def _safe_name(name: str) -> str:
@@ -444,10 +486,8 @@ def _safe_name(name: str) -> str:
 async def _to_discord(link: dict, msg: dict) -> None:
     lock = ponte.locks.setdefault(link["channel_id"], asyncio.Lock())
     async with lock:  # uma de cada vez, para chegar na ordem
-        try:
+        if ponte.by_channel.get(link["channel_id"]) is link:
             await _send_to_discord(link, msg)
-        except Exception:
-            log.exception("ponte: falhou ao mandar para o Discord")
 
 
 async def _send_to_discord(link: dict, msg: dict) -> None:
@@ -471,7 +511,10 @@ async def _send_to_discord(link: dict, msg: dict) -> None:
             content += ("\n" if content else "") + f"(anexo grande demais para o Discord: {a.get('name') or 'arquivo'})"
             continue
         try:
-            files.append((r["name"] or "arquivo", (settings.upload_dir / r["path"]).read_bytes(), r["mime"]))
+            with (settings.upload_dir / r["path"]).open("rb") as source:
+                data = source.read(MAX_FILE + 1)
+            if len(data) <= MAX_FILE:
+                files.append((r["name"] or "arquivo", data, r["mime"]))
         except OSError:
             continue
     content = content[:2000]
