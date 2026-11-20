@@ -1,6 +1,6 @@
 # Atualizações do cliente Windows
 
-O cliente 2.0.1 consulta o manifesto fixo `https://github.com/JoaoAntonio08/call-dos-games/releases/latest/download/latest.json`. O plugin oficial do Tauri 2 compara versões e exige assinatura válida do instalador antes de instalar. O site não fornece URLs ao atualizador nativo. A verificação ocorre na abertura; o menu da bandeja permite verificar e instalar manualmente. A instalação pede confirmação em uma janela nativa do Windows. Só o site configurado pode chamar os comandos nativos. O progresso também é enviado à interface web existente.
+O cliente 2.0.1 consulta o manifesto fixo `https://github.com/JoaoAntonio08/call-dos-games/releases/latest/download/latest.json`. O plugin oficial do Tauri 2 compara versões, exige assinatura válida do instalador e verifica se a versão assinada corresponde à anunciada antes de instalar. O site não fornece URLs ao atualizador nativo. A verificação ocorre na abertura; o menu da bandeja permite verificar e instalar manualmente. A instalação pede confirmação em uma janela nativa do Windows. Só o site configurado pode chamar os comandos nativos. O progresso também é enviado à interface web existente.
 
 Sem `CDG_UPDATER_PUBKEY` no **build** do cliente, a atualização permanece desativada. O código nunca aceita instalador sem assinatura. Isso é intencional até a chave e a publicação estarem prontas.
 
