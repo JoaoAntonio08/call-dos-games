@@ -36,6 +36,7 @@ from .routes.musica import router as musica_router
 from .routes.jogos import free_games_loop
 from .routes.discord import router as discord_router, discord_loop
 from .routes.noites import router as noites_router, noites_loop
+from .routes.templates import router as templates_router
 
 
 @asynccontextmanager
@@ -125,5 +126,5 @@ async def health() -> dict:
     return {"ok": True}
 
 
-for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router, bots_router, uso_router, musica_router, discord_router, noites_router):
+for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router, bots_router, uso_router, musica_router, discord_router, noites_router, templates_router):
     app.include_router(r)
