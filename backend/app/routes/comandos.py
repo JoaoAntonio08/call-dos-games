@@ -63,6 +63,7 @@ MODULE_HELP: dict[str, str] = {
     "tocar": "Põe uma música na fila da sua call: /tocar nome ou link",
     "fila": "Mostra a fila de músicas da sua call",
     "pular": "Pula a música (a sua) ou vota para pular",
+    "radio": "Liga/desliga o rádio da call: quando a fila acaba, entra música na mesma vibe",
     "enquete": "Enquete: /enquete pergunta | opção 1 | opção 2",
     "jogo": "Procura um jogo na Steam: /jogo nome",
     "gratis": "Jogos grátis para resgatar na Steam agora",
@@ -78,7 +79,7 @@ def resolve(name: str) -> str:
 def is_private_command(content: str) -> bool:
     """Comando de música e /ajuda: só quem digitou vê (e some em 12 h)."""
     parsed = parse_command(content)
-    return bool(parsed) and resolve(parsed[0]) in ("tocar", "fila", "pular", "ajuda")
+    return bool(parsed) and resolve(parsed[0]) in ("tocar", "fila", "pular", "radio", "ajuda")
 
 
 async def gate(name: str, ch: dict, user_id: int) -> tuple[Any, Any, str | None]:

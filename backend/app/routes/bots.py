@@ -31,7 +31,7 @@ MAX_BOTS = 10
 BRT = timezone(timedelta(hours=-3))
 
 MODULES: dict[str, dict[str, Any]] = {
-    "musica": {"label": "Música", "commands": ["tocar", "fila", "pular"], "house": True},
+    "musica": {"label": "Música", "commands": ["tocar", "fila", "pular", "radio"], "house": True},
     "diversao": {"label": "Diversão", "commands": ["dado", "moeda", "sortear", "escolher"], "house": True},
     "enquete": {"label": "Enquete", "commands": ["enquete"], "house": True},
     "jogos": {"label": "Jogos", "commands": ["jogo", "gratis"], "house": True},
@@ -43,7 +43,7 @@ MODULES: dict[str, dict[str, Any]] = {
 }
 COMMAND_MODULE = {c: k for k, m in MODULES.items() for c in m["commands"]}
 # apelidos que também valem
-ALIASES = {"play": "tocar", "p": "tocar", "skip": "pular", "queue": "fila", "poll": "enquete", "game": "jogo", "steam": "jogo", "free": "gratis", "grátis": "gratis"}
+ALIASES = {"play": "tocar", "p": "tocar", "skip": "pular", "autoplay": "radio", "rádio": "radio", "queue": "fila", "poll": "enquete", "game": "jogo", "steam": "jogo", "free": "gratis", "grátis": "gratis"}
 
 
 # ------------------------------------------------------------------ cache dos bots por servidor

@@ -667,9 +667,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       nowVideo.current = vid;
     };
     const onAdded = (e: Event) => {
-      const d = (e as CustomEvent<{ channel_id: string; title: string; by: string; position: number; user_id: string }>).detail;
+      const d = (e as CustomEvent<{ channel_id: string; title: string; by: string; position: number; user_id: string; radio?: boolean }>).detail;
       // nada tocando: a música já começa e o aviso de "tocando agora" basta
       if (d.channel_id !== channelId || !useStore.getState().music[d.channel_id]) return;
+      if (d.radio) return toast(`📻 Rádio da call: a seguir, “${d.title}”. (/radio desliga)`);
       toast(d.user_id === me?.id ? `🎵 “${d.title}” entrou na fila (posição ${d.position}).` : `🎵 ${d.by} pôs “${d.title}” na fila.`);
     };
     window.addEventListener("cdg:music-state", onState);
