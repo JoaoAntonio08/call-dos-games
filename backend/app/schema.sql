@@ -352,6 +352,17 @@ CREATE TABLE IF NOT EXISTS discord_links (
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Ponte de voz: um canal de voz daqui ligado a um canal de voz do Discord (o áudio passa pelo serviço ponte-voz)
+CREATE TABLE IF NOT EXISTS discord_voice_links (
+    channel_id         BIGINT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+    discord_channel_id TEXT NOT NULL UNIQUE,
+    discord_guild_id   TEXT NOT NULL,
+    discord_name       TEXT NOT NULL DEFAULT '',
+    guild_name         TEXT NOT NULL DEFAULT '',
+    created_by         BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Noite da turma: evento marcado (ex.: sexta 21h), com lembrete, call pronta e presença registrada
 CREATE TABLE IF NOT EXISTS server_events (
     id               BIGINT PRIMARY KEY,

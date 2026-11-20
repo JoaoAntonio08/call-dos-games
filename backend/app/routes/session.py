@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ..core import Auth, CurrentUser, err, fetch_user, parse_id, pool, settings, sid, user_out
 from ..realtime import can_access_channel, hub
 from .servers import server_out
+from .discord import discord_voice_snapshot
 from .users import friends_of, list_dms, me_out
 from .auth import set_session_cookie
 
@@ -37,6 +38,7 @@ async def bootstrap(response: Response, authorization: str = Header(default=""),
         "read_states": {sid(r["channel_id"]): sid(r["last_read_id"]) for r in reads},
         "voice": hub.voice_snapshot(visible),
         "music": hub.music_snapshot(visible),
+        "discord_voice": discord_voice_snapshot(visible),
         "livekit": bool(settings.livekit_url and settings.livekit_key and settings.livekit_secret),
         # franquia de GB só existe no LiveKit Cloud; no servidor próprio o aviso muda
         "livekit_cloud": "livekit.cloud" in settings.livekit_url,

@@ -66,3 +66,9 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+backend/ponte-voz/node_modules/
+
+# chaves de assinatura (updater do Tauri etc.) nunca vão para o git
+*.key
+*.key.pub.bak
+desktop-tauri/release/

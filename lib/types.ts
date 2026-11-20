@@ -230,6 +230,15 @@ export interface SteamProfile {
   recent: { appid: string; name: string; hours_2weeks: number; hours_total: number; image: string }[];
 }
 
+/** Alguém que está na call do Discord ligada a um canal de voz daqui. */
+export interface DiscordVoiceMember {
+  id: string;
+  name: string;
+  avatar: string;
+  mute: boolean;
+  deaf: boolean;
+}
+
 export interface Bootstrap {
   me: Me;
   servers: Server[];
@@ -238,6 +247,8 @@ export interface Bootstrap {
   read_states: Record<string, string>;
   voice: Record<string, VoiceMember[]>;
   music?: Record<string, NowPlaying>;
+  /** quem está nas calls do Discord ligadas pela ponte de voz (canal de voz daqui -> pessoas) */
+  discord_voice?: Record<string, DiscordVoiceMember[]>;
   livekit: boolean;
   livekit_cloud: boolean;
 }

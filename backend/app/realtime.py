@@ -285,7 +285,12 @@ async def gateway(ws: WebSocket) -> None:
     voice = hub.voice_snapshot(visible_channels)
     games = await hub.visible_games(user_id)
     music = hub.music_snapshot(visible_channels)
-    await ws.send_text(json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice, "music": music, "games": games}}))
+    from .routes.discord import discord_voice_snapshot  # noqa: PLC0415 (evita import circular)
+
+    dvoice = discord_voice_snapshot(visible_channels)
+    await ws.send_text(
+        json.dumps({"t": "hello", "d": {"user_id": sid(user_id), "voice": voice, "music": music, "games": games, "discord_voice": dvoice}})
+    )
     if not was_online:
         await hub.broadcast_presence(user_id)
 

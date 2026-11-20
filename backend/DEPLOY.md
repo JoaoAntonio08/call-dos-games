@@ -203,6 +203,29 @@ Espelha um canal de texto daqui com um canal do Discord, nos dois sentidos: o qu
 
 Detalhes: o bot cria um webhook "Call dos Games" no canal do Discord para mandar as mensagens daqui (se alguém apagar o webhook, a ponte desliga e avisa). Ninguém é marcado com @everyone de nenhum lado. Imagens que vêm do Discord são guardadas aqui (até 10 MB cada) e contam na cota de quem ligou a ponte. Edições e exclusões não são copiadas. O token nunca vai para o site nem para o git. `DISCORD_API_BASE` existe só para testes com um Discord de mentira; em produção deixe sem definir.
 
+### Calls do Discord dentro das calls daqui (opcional)
+
+Liga uma call daqui a um canal de voz do Discord: quem está lá aparece na lista da call daqui (selo **Discord**, com microfone/fone desligado), e quando tem gente nos dois lados o bot entra na call do Discord e passa o áudio nos dois sentidos. Precisa da ponte acima já funcionando e do **LiveKit** (seção 6). Sem LiveKit não dá para ligar o áudio.
+
+1. Na aba **Bot** do Discord Developer Portal não muda nada. Mas o bot precisa das permissões novas **Conectar**, **Falar** e **Usar detecção de voz**: abra de novo o link **Pôr o bot no seu Discord** (ele já vem com elas) e autorize no mesmo servidor do Discord. Ou dê essas permissões ao cargo do bot à mão.
+2. O serviço usa Node 22.12 ou mais novo (`node -v`; o mesmo do site serve se for 22+).
+3. Gere a senha entre a API e o serviço e ponha no `backend/.env`:
+   ```bash
+   echo "DISCORD_VOICE_SECRET=$(openssl rand -hex 32)" | sudo -u calldosgames tee -a /opt/calldosgames/app/backend/.env >/dev/null
+   ```
+   Ele usa também o `DISCORD_BOT_TOKEN` e o `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` que já estão lá. Só uma conta de bot: a API e o serviço usam o mesmo token, cada um com a sua conexão.
+4. Instale e ligue o serviço:
+   ```bash
+   cd /opt/calldosgames/app/backend/ponte-voz && sudo -u calldosgames -H npm ci --omit=dev --no-audit --no-fund
+   sudo cp /opt/calldosgames/app/backend/deploy/calldosgames-ponte-voz.service /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl restart calldosgames-api && sudo systemctl enable --now calldosgames-ponte-voz
+   journalctl -u calldosgames-ponte-voz -n 20   # deve dizer "ponte de voz no ar como ..."
+   ```
+   Depois disso o `atualizar.sh` já atualiza e reinicia ele junto.
+5. No site, **Configurações do servidor → Ponte com o Discord → Calls**: **Ligar ao Discord** na call daqui. Aparece `!ponte ABCD-1234`; alguém que administra o servidor do Discord digita isso **no chat do canal de voz** do Discord (o balãozinho ao lado do nome da call). Para desligar: o botão aqui ou `!ponte desligar` no mesmo chat.
+
+Como funciona: o serviço só conversa com a API pela própria máquina (`127.0.0.1`, com a senha acima), entra na sala do LiveKit como "Discord" e mistura as vozes de 20 em 20 ms. O bot só entra quando tem gente dos dois lados e sai 20 s depois que um dos lados esvazia. As calls do Discord têm criptografia de ponta a ponta (DAVE), e a biblioteca do bot cuida disso. Quem está no Discord ouve quem fala aqui pelo bot, e quem está aqui ouve o Discord como um participante "Discord". Tela e câmera não passam, só voz.
+
 ### Noite da turma
 
 Página nova em cada servidor (ao lado do Hall da Fama). Admins marcam a noite (ex.: toda sexta 21h), escolhem a sala de voz, o canal dos avisos, o que vai rolar (vídeo ou música do YouTube começam sozinhos quando a turma entra pelo aviso) e o lembrete. Todo mundo responde Vou/Talvez/Não vou, recebe o lembrete antes e o aviso de "começou" na hora (quem respondeu "não vou" não é incomodado). Durante a noite a API conta quanto tempo cada um ficou na call; no fim manda o resumo no canal e a presença vai para o **Hall da presença**. Não precisa configurar nada. `NOITES_TICK` e `NOITES_MIN_PRESENCE` existem só para testes rápidos.

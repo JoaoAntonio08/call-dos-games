@@ -336,7 +336,8 @@ type Bridge = {
 
 export function DiscordTab({ server }: { server: Server }) {
   const text = server.channels.filter((c) => c.type === "text");
-  const ids = text.map((c) => c.id).join(",");
+  const voice = server.channels.filter((c) => c.type === "voice");
+  const ids = [...text, ...voice].map((c) => c.id).join(",");
   const [info, setInfo] = useState<Record<string, Bridge>>({});
   const [error, setError] = useState("");
   const first = Object.values(info)[0];
@@ -383,19 +384,34 @@ export function DiscordTab({ server }: { server: Server }) {
           )}
         </div>
       )}
+      <p className="label mb-2 text-oat/55">Canais de texto</p>
       <div className="space-y-2">
         {text.map((c) => (
           <BridgeRow key={c.id} channel={c.name} channelId={c.id} info={info[c.id]} onChange={(b) => setInfo((m) => ({ ...m, [c.id]: b }))} />
         ))}
       </div>
+      {voice.length > 0 && (
+        <>
+          <p className="label mb-1 mt-6 text-oat/55">Calls</p>
+          <p className="mb-2.5 text-[13px] leading-relaxed text-oat/50">
+            Liga uma call daqui a uma call do Discord: quem está lá aparece na lista da call, e quando tiver gente nos dois lados o bot entra na call do Discord e todo mundo se escuta.
+          </p>
+          <div className="space-y-2">
+            {voice.map((c) => (
+              <BridgeRow key={c.id} voice channel={c.name} channelId={c.id} info={info[c.id]} onChange={(b) => setInfo((m) => ({ ...m, [c.id]: b }))} />
+            ))}
+          </div>
+        </>
+      )}
       <Tip>
-        Para desligar pelo Discord, um admin de lá digita <code>!ponte desligar</code> no canal. Imagens de lá ficam guardadas aqui na cota de quem ligou a ponte.
+        Para desligar pelo Discord, um admin de lá digita <code>!ponte desligar</code> no canal (ou no chat da call). Imagens de lá ficam guardadas aqui na cota de quem ligou a ponte.
       </Tip>
     </div>
   );
 }
 
-function BridgeRow({ channel, channelId, info, onChange }: { channel: string; channelId: string; info?: Bridge; onChange: (b: Bridge) => void }) {
+function BridgeRow({ channel, channelId, info, onChange, voice }: { channel: string; channelId: string; info?: Bridge; onChange: (b: Bridge) => void; voice?: boolean }) {
+  const mark = voice ? "🔊 " : "#";
   const [code, setCode] = useState<{ command: string; until: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -413,13 +429,13 @@ function BridgeRow({ channel, channelId, info, onChange }: { channel: string; ch
           if (b.link) {
             setCode(null);
             onChange(b);
-            toast(`#${channel} ligado ao #${b.link.discord_channel} do Discord`);
+            toast(`${mark}${channel} ligado ao ${mark}${b.link.discord_channel} do Discord`);
           }
         })
         .catch(() => {});
     }, 2500);
     return () => window.clearInterval(t);
-  }, [code, channelId, channel, onChange]);
+  }, [code, channelId, channel, onChange, mark]);
 
   async function start() {
     setBusy(true);
@@ -450,10 +466,12 @@ function BridgeRow({ channel, channelId, info, onChange }: { channel: string; ch
     <div className="rounded-[12px] bg-cocoa-3 px-3 py-2.5">
       <div className="flex items-center gap-3">
         <span className="min-w-0 flex-1 truncate font-medium">
-          #{channel}
+          {mark}
+          {channel}
           {info?.link && (
             <span className="ml-2 text-[13px] font-normal text-oat/55">
-              ⇄ #{info.link.discord_channel} <span className="text-oat/35">({info.link.discord_server})</span>
+              ⇄ {mark}
+              {info.link.discord_channel} <span className="text-oat/35">({info.link.discord_server})</span>
             </span>
           )}
         </span>
@@ -469,9 +487,15 @@ function BridgeRow({ channel, channelId, info, onChange }: { channel: string; ch
       </div>
       {code && !info?.link && (
         <div className="mt-2.5 rounded-[10px] border border-ember/35 bg-ember/10 p-3 text-[13px] leading-relaxed">
-          <p>
-            No canal do Discord que vai ficar ligado ao <b>#{channel}</b>, alguém que administra o servidor de lá digita:
-          </p>
+          {voice ? (
+            <p>
+              Na call do Discord que vai ficar ligada à <b>{channel}</b>, abra o chat da call (o balãozinho ao lado do nome) e alguém que administra o servidor de lá digita:
+            </p>
+          ) : (
+            <p>
+              No canal do Discord que vai ficar ligado ao <b>#{channel}</b>, alguém que administra o servidor de lá digita:
+            </p>
+          )}
           <div className="mt-2 flex gap-2">
             <input readOnly value={code.command} className="field h-10 flex-1 font-mono text-[14px]" aria-label="Comando para digitar no Discord" onFocus={(e) => e.currentTarget.select()} />
             <button
