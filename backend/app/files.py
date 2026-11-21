@@ -129,9 +129,13 @@ async def file_access_allowed(row: Any, me: Auth | None) -> bool:
         return True
 
     # Anexos e figurinhas enviados só podem ser lidos por quem ainda vê a mensagem.
+    # (inclui a imagem dos cartões que vieram do Discord pela ponte)
     candidates = await pool().fetch(
-        "SELECT channel_id, visible_to FROM messages WHERE attachments @> $1::jsonb",
+        """SELECT channel_id, visible_to FROM messages
+           WHERE attachments @> $1::jsonb OR embeds @> $2::jsonb OR embeds @> $3::jsonb""",
         json.dumps([{"id": sid(file_id)}]),
+        json.dumps([{"image": {"file_id": sid(file_id)}}]),
+        json.dumps([{"thumbnail": {"file_id": sid(file_id)}}]),
     )
     for message in candidates:
         if message["visible_to"] is not None and message["visible_to"] != me.id:

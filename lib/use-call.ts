@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SpeakingDetector } from "./speaking";
+import { problemFromDisconnect, problemFromError, type CallProblem } from "./call-errors";
 import {
   AudioPresets,
   ConnectionState,
@@ -36,6 +37,15 @@ export const RESOLUTIONS = {
   "2160p": { width: 3840, height: 2160, label: "4K" },
 } as const;
 export type ResolutionId = keyof typeof RESOLUTIONS;
+const RES_ORDER: ResolutionId[] = ["720p", "1080p", "1440p", "2160p"];
+
+/** A maior resolução permitida que não passa do limite do servidor. */
+export function clampResolution(res: ResolutionId, cap: ResolutionId): ResolutionId {
+  return RES_ORDER.indexOf(res) > RES_ORDER.indexOf(cap) ? cap : res;
+}
+export function aboveCap(res: ResolutionId, cap: ResolutionId): boolean {
+  return RES_ORDER.indexOf(res) > RES_ORDER.indexOf(cap);
+}
 
 export type ShareMode = "video" | "game";
 
@@ -136,7 +146,7 @@ function snapshot(room: Room, det?: SpeakingDetector | null): Peer[] {
 }
 
 /** Quem chama decide de onde vem o token (call rápida por chave ou canal de servidor). */
-export type TokenFetcher = () => Promise<{ token: string; url: string }>;
+export type TokenFetcher = () => Promise<{ token: string; url: string; quality?: { max_resolution?: string } }>;
 
 /** Token da call rápida (sem conta), gerado pela rota /api/token do próprio site. */
 export function keyTokenFetcher(key: string, name: string): TokenFetcher {
@@ -171,9 +181,18 @@ export function useCall() {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [canPlayAudio, setCanPlayAudio] = useState(true);
   const [sharing, setSharing] = useState<ShareSettings | null>(null);
+  const sharingRef = useRef<ShareSettings | null>(null);
+  useEffect(() => {
+    sharingRef.current = sharing;
+  }, [sharing]);
+  /** até que resolução o servidor deixa compartilhar agora (cai quando ele está cheio) */
+  const [shareCap, setShareCapState] = useState<ResolutionId>("2160p");
+  const shareCapRef = useRef<ResolutionId>("2160p");
   const [room, setRoom] = useState<Room | null>(null);
   /** por que a última call acabou sem você clicar em sair */
   const [endReason, setEndReason] = useState<"elsewhere" | "removed" | null>(null);
+  /** o que deu errado ao entrar ou por que a call caiu, já em português (null = nada) */
+  const [problem, setProblem] = useState<CallProblem | null>(null);
 
   const detRef = useRef<SpeakingDetector | null>(null);
   const refresh = useCallback(() => {
@@ -227,10 +246,16 @@ export function useCall() {
     }) => {
       if (roomRef.current) return false;
       setEndReason(null);
+      setProblem(null);
       setStatus("connecting");
       setError("");
       try {
         const data = await getToken();
+        const cap = data.quality?.max_resolution;
+        if (cap && cap in RESOLUTIONS) {
+          shareCapRef.current = cap as ResolutionId;
+          setShareCapState(cap as ResolutionId);
+        }
 
         const r = new Room({
           adaptiveStream: true,
@@ -286,6 +311,8 @@ export function useCall() {
           } else if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
             setEndReason("removed");
           }
+          const dropped = problemFromDisconnect(reason);
+          if (dropped) setProblem(dropped);
           setStatus((st) => (st === "error" ? st : "disconnected"));
         });
 
@@ -316,7 +343,9 @@ export function useCall() {
         roomRef.current = null;
         setRoom(null);
         setStatus("error");
-        setError(e instanceof Error ? e.message : "Não foi possível entrar na sala.");
+        const p = problemFromError(e);
+        setProblem(p);
+        setError(p.text);
         return false;
       }
     },
@@ -418,6 +447,11 @@ export function useCall() {
       const r = roomRef.current;
       if (!r) return;
       if (screenTracks.current.length) await stopShare();
+      const capped = clampResolution(s.resolution, shareCapRef.current);
+      if (capped !== s.resolution) {
+        flash(`O servidor está cheio agora: a tela vai em ${RESOLUTIONS[capped].label}.`);
+        s = { ...s, resolution: capped };
+      }
       const res = RESOLUTIONS[s.resolution];
       let tracks: LocalTrack[];
       try {
@@ -481,6 +515,37 @@ export function useCall() {
     [flash, refresh, stopShare],
   );
 
+  /**
+   * Novo limite do servidor. Se a tela estiver indo acima dele, baixa na hora, sem parar a transmissão
+   * (troca o tamanho capturado e o bitrate do envio).
+   */
+  const setShareCap = useCallback(
+    async (cap: ResolutionId) => {
+      shareCapRef.current = cap;
+      setShareCapState(cap);
+      const cur = sharingRef.current;
+      if (!cur || !aboveCap(cur.resolution, cap)) return;
+      const video = screenTracks.current.find((t) => t.kind === Track.Kind.Video);
+      if (!video) return;
+      const res = RESOLUTIONS[cap];
+      try {
+        await video.mediaStreamTrack.applyConstraints({ width: { max: res.width }, height: { max: res.height }, frameRate: cur.fps });
+        const sender = video.sender;
+        if (sender) {
+          const params = sender.getParameters();
+          for (const e of params.encodings ?? []) e.maxBitrate = bitrateFor(cap, cur.fps);
+          await sender.setParameters(params);
+        }
+      } catch {
+        /* o navegador não deixou mudar: segue como estava */
+        return;
+      }
+      setSharing({ ...cur, resolution: cap });
+      flash(`O servidor ficou cheio: sua tela baixou para ${res.label} para ninguém travar.`);
+    },
+    [flash],
+  );
+
   const startAudio = useCallback(async () => {
     await roomRef.current?.startAudio();
     setCanPlayAudio(true);
@@ -490,12 +555,15 @@ export function useCall() {
     room,
     status,
     endReason,
+    problem,
     error,
     notice,
     flash,
     peers,
     canPlayAudio,
     sharing,
+    shareCap,
+    setShareCap,
     join,
     leave,
     toggleMic,

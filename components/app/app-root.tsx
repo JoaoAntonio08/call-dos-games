@@ -7,6 +7,7 @@ import { bootstrap, useStore } from "@/lib/store";
 import { ApiPending } from "@/components/api-pending";
 import { VoiceProvider } from "@/lib/voice";
 import { Shell } from "./shell";
+import { Intro } from "./intro";
 
 const LAMP_LINES = ["Acendendo o abajur…", "Ajeitando as almofadas…", "Esquentando a pipoca…", "Chamando a turma…"];
 
@@ -37,20 +38,30 @@ export function AppRoot() {
   }, [phase, router, path]);
 
   if (!API_READY) return <ApiPending />;
+  // a animação de entrada fica no mesmo lugar da árvore nas duas telas: não corta quando o app termina de carregar
   if (phase !== "ready") {
-    return (
+    return withIntro(
       <main className="grid min-h-svh flex-1 place-items-center bg-cocoa-1">
         <div className="text-center">
           <p className="font-display-wonk text-[34px] text-oat">{LAMP_LINES[0]}</p>
           <p className="mt-3 text-[13px] text-oat/40">Se demorar, o servidor da turma pode estar dormindo.</p>
         </div>
-      </main>
+      </main>,
     );
   }
 
-  return (
+  return withIntro(
     <VoiceProvider>
       <Shell />
-    </VoiceProvider>
+    </VoiceProvider>,
+  );
+}
+
+function withIntro(content: React.ReactNode) {
+  return (
+    <>
+      {content}
+      <Intro />
+    </>
   );
 }

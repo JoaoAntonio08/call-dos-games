@@ -39,6 +39,11 @@ TOKEN = env("DISCORD_BOT_TOKEN")
 # só para laboratório (Discord de mentira nos testes); em produção fica o oficial
 API = env("DISCORD_API_BASE", "https://discord.com/api/v10").rstrip("/")
 CDN_HOSTS = {"cdn.discordapp.com", "media.discordapp.net", urlparse(API).hostname or ""}
+# imagens de cartões (embeds) de sites de fora passam pelo proxy do Discord nestes endereços
+PROXY_HOSTS = frozenset({"images-ext-1.discordapp.net", "images-ext-2.discordapp.net"})
+MAX_EMBEDS = 4
+# figurinha do Discord: 1 PNG, 2 APNG, 4 GIF (3 é Lottie, que não dá para mostrar como imagem)
+STICKER_EXT = {1: "png", 2: "png", 4: "gif"}
 
 # o que o bot precisa receber: servidores, quem está nas calls, mensagens e o texto delas
 # (ligar "Message Content Intent" no portal; as outras não precisam de liberação)
@@ -541,20 +546,91 @@ def _display(author: dict, member: dict) -> str:
     return (member.get("nick") or author.get("global_name") or author.get("username") or "Alguém")[:40]
 
 
-def _clean(d: dict) -> str:
-    text = d.get("content") or ""
-    names = {str(m["id"]): _display(m, m.get("member") or {}) for m in d.get("mentions") or []}
-    text = re.sub(r"<@!?(\d+)>", lambda m: "@" + names.get(m.group(1), "alguém"), text)
-    g = ponte.guilds.get(str(d.get("guild_id")), {})
+def _clean_text(text: str, guild_id: Any, names: dict[str, str] | None = None) -> str:
+    """Menções do Discord (<@id>, <#id>, <@&id>, <t:...>) viram texto. Emoji próprio (<:nome:id>) fica: o chat mostra a imagem."""
+    names = names or {}
+    text = re.sub(r"<@!?(\d+)>", lambda m: "@" + names.get(m.group(1), "alguém"), text or "")
+    g = ponte.guilds.get(str(guild_id), {})
     text = re.sub(r"<#(\d+)>", lambda m: "#" + (g.get("channels", {}).get(m.group(1)) or "canal"), text)
     text = re.sub(r"<@&\d+>", "@cargo", text)
-    text = re.sub(r"<a?:(\w+):\d+>", r":\1:", text)  # emoji próprio do servidor
+    text = re.sub(r"<t:(\d{1,12})(?::\w)?>", lambda m: time.strftime("%d/%m/%Y %H:%M", time.localtime(int(m.group(1)))), text)
     return text.strip()
 
 
-async def _download(url: str, name: str, owner_id: int | None) -> dict | None:
+def _clean(d: dict) -> str:
+    names = {str(m["id"]): _display(m, m.get("member") or {}) for m in d.get("mentions") or []}
+    return _clean_text(d.get("content") or "", d.get("guild_id"), names)
+
+
+def _http_url(u: Any) -> str:
+    u = str(u or "")
+    return u[:600] if urlparse(u).scheme in ("http", "https") else ""
+
+
+def _discord_img(u: Any) -> str:
+    """Imagem que dá para mostrar direto: só dos endereços do Discord (o chat não busca imagem em qualquer site)."""
+    u = str(u or "")
+    p = urlparse(u)
+    return u[:600] if p.scheme == "https" and (p.hostname in CDN_HOSTS or p.hostname in PROXY_HOSTS) else ""
+
+
+async def _embed_image(img: Any, owner: int | None, name: str) -> dict | None:
+    """Guarda a imagem do cartão aqui (os links do Discord vencem em ~1 dia); se não der, usa o do Discord."""
+    if not isinstance(img, dict):
+        return None
+    for src in (img.get("url"), img.get("proxy_url")):
+        if _discord_img(src):
+            got = await _download(str(src), name, owner, extra_hosts=PROXY_HOSTS)
+            if got and str(got.get("mime") or "").startswith("image/"):
+                return {"file_id": got.get("id"), "url": got.get("url"), "width": img.get("width"), "height": img.get("height")}
+    url = _discord_img(img.get("proxy_url")) or _discord_img(img.get("url"))
+    return {"url": url, "width": img.get("width"), "height": img.get("height")} if url else None
+
+
+async def _embeds(d: dict, owner: int | None) -> list[dict]:
+    """Os cartões da mensagem do Discord (starboard da Loritta, avisos de bots, prévia de links...)."""
+    out: list[dict] = []
+    gid = d.get("guild_id")
+    for e in (d.get("embeds") or [])[:MAX_EMBEDS]:
+        if not isinstance(e, dict):
+            continue
+        color = e.get("color")
+        author = e.get("author") if isinstance(e.get("author"), dict) else {}
+        footer = e.get("footer") if isinstance(e.get("footer"), dict) else {}
+        provider = e.get("provider") if isinstance(e.get("provider"), dict) else {}
+        card = {
+            "color": f"#{color:06x}" if isinstance(color, int) and 0 <= color <= 0xFFFFFF else None,
+            "author": (
+                {"name": str(author.get("name"))[:256], "icon": _discord_img(author.get("proxy_icon_url") or author.get("icon_url")), "url": _http_url(author.get("url"))}
+                if author.get("name")
+                else None
+            ),
+            "title": _clean_text(str(e.get("title") or ""), gid)[:256],
+            "url": _http_url(e.get("url")),
+            "description": _clean_text(str(e.get("description") or ""), gid)[:4096],
+            "fields": [
+                {"name": _clean_text(str(f.get("name") or ""), gid)[:256], "value": _clean_text(str(f.get("value") or ""), gid)[:1024], "inline": bool(f.get("inline"))}
+                for f in (e.get("fields") or [])[:25]
+                if isinstance(f, dict)
+            ],
+            "image": await _embed_image(e.get("image"), owner, "imagem"),
+            "thumbnail": await _embed_image(e.get("thumbnail"), owner, "miniatura"),
+            "footer": (
+                {"text": _clean_text(str(footer.get("text")), gid)[:2048], "icon": _discord_img(footer.get("proxy_icon_url") or footer.get("icon_url"))}
+                if footer.get("text")
+                else None
+            ),
+            "provider": str(provider.get("name") or "")[:256],
+        }
+        # cartão vazio (ex.: um link sem prévia): não mostra nada
+        if any(card[k] for k in ("author", "title", "description", "fields", "image", "thumbnail", "footer")):
+            out.append(card)
+    return out
+
+
+async def _download(url: str, name: str, owner_id: int | None, extra_hosts: frozenset[str] = frozenset()) -> dict | None:
     host = urlparse(url).hostname or ""
-    if owner_id is None or urlparse(url).scheme not in ("https", "http") or host not in CDN_HOSTS:
+    if owner_id is None or urlparse(url).scheme not in ("https", "http") or (host not in CDN_HOSTS and host not in extra_hosts):
         return None
     try:
         with tempfile.TemporaryFile() as spool:
@@ -591,14 +667,23 @@ async def _to_app(link: dict, d: dict) -> None:
             attachments.append(got)
         else:
             content += ("\n" if content else "") + f"[anexo: {a.get('filename') or 'arquivo'}]"
-    for s in d.get("sticker_items") or []:
-        content += ("\n" if content else "") + f"[figurinha: {s.get('name') or ''}]"
+    for st in (d.get("sticker_items") or [])[:3]:
+        ext = STICKER_EXT.get(int(st.get("format_type") or 0))
+        got = None
+        if ext and str(st.get("id") or "").isdigit() and len(attachments) < MAX_FILES:
+            got = await _download(f"https://media.discordapp.net/stickers/{st['id']}.{ext}?size=320", f"{st.get('name') or 'figurinha'}.{ext}", link.get("created_by"))
+        if got:
+            got.pop("still", None)
+            attachments.append(got)
+        else:
+            content += ("\n" if content else "") + f"[figurinha: {st.get('name') or ''}]"
+    embeds = await _embeds(d, link.get("created_by"))
     content = content[:4000]
-    if not content and not attachments:
+    if not content and not attachments and not embeds:
         return
     await post_webhook_message(
         link["channel_id"], link["channel_id"], _display(author, member), content,
-        avatar=_avatar(author, member, str(d.get("guild_id"))), ext=str(author.get("id") or ""), attachments=attachments,
+        avatar=_avatar(author, member, str(d.get("guild_id"))), ext=str(author.get("id") or ""), attachments=attachments, embeds=embeds,
     )
 
 

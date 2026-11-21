@@ -13,6 +13,7 @@ from ..core import Auth, CurrentUser, err, fetch_user, parse_id, pool, settings,
 from ..realtime import can_access_channel, hub
 from .servers import server_out
 from .discord import discord_voice_snapshot
+from .. import carga
 from .users import friends_of, list_dms, me_out
 from .auth import set_session_cookie
 
@@ -112,4 +113,10 @@ async def voice_token(body: VoiceIn, me: Auth = CurrentUser) -> dict:
         "video": grant,
     }
     token = jwt.encode(claims, settings.livekit_secret, algorithm="HS256")
-    return {"token": token, "url": settings.livekit_url, "identity": str(me.id)}
+    return {"token": token, "url": settings.livekit_url, "identity": str(me.id), "quality": carga.current()}
+
+
+@router.get("/voice/quality")
+async def voice_quality(me: Auth = CurrentUser) -> dict:
+    """Até que resolução dá para compartilhar a tela agora (o servidor cheio baixa o limite)."""
+    return carga.current()

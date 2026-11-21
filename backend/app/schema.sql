@@ -399,3 +399,6 @@ CREATE TABLE IF NOT EXISTS event_attendance (
     seconds   INT NOT NULL DEFAULT 0,
     PRIMARY KEY (server_id, night, user_id)
 );
+
+-- ponte com o Discord: cartões (embeds) das mensagens de lá, como o do starboard da Loritta
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS embeds JSONB NOT NULL DEFAULT '[]';

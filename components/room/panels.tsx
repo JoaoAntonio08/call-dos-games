@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Room } from "livekit-client";
-import { FREE_TIER_GB, RESOLUTIONS, bitrateFor, gbPerHour, type ResolutionId, type ShareSettings } from "@/lib/use-call";
+import { FREE_TIER_GB, RESOLUTIONS, aboveCap, bitrateFor, clampResolution, gbPerHour, type ResolutionId, type ShareSettings } from "@/lib/use-call";
 import { parseYouTube } from "@/lib/use-youtube-sync";
 
 /** Folha de papel presa no topo do dock. */
@@ -26,7 +26,7 @@ export function Panel({
     <div
       role="dialog"
       aria-label={title}
-      className="pop-in max-h-[calc(100svh-160px)] w-[min(400px,calc(100vw-16px))] overflow-y-auto rounded-[18px] bg-cocoa-0 text-oat"
+      className="pop-in glass-float max-h-[calc(100svh-160px)] w-[min(400px,calc(100vw-16px))] overflow-y-auto rounded-[18px] bg-cocoa-0 text-oat"
     >
       <div className="flex items-start justify-between border-b border-oat/10 px-5 pb-3 pt-4">
         <div>
@@ -49,7 +49,7 @@ function Segmented<T extends string | number>({
   label,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; disabled?: boolean; title?: string }[];
   onChange: (v: T) => void;
   label: string;
 }) {
@@ -60,8 +60,10 @@ function Segmented<T extends string | number>({
           key={String(o.value)}
           type="button"
           aria-pressed={o.value === value}
+          disabled={o.disabled}
+          title={o.title}
           onClick={() => onChange(o.value)}
-          className={`press h-8 flex-1 rounded-[9px] px-2 text-[12.5px] font-semibold ${
+          className={`press h-8 flex-1 rounded-[9px] px-2 text-[12.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-35 ${
             o.value === value ? "bg-oat text-cocoa-0" : "text-oat/70 hover:bg-cocoa-5"
           }`}
         >
@@ -103,8 +105,11 @@ export function SharePanel({
   onClose,
   freeTier = true,
   clipOnly,
+  maxResolution = "2160p",
 }: {
   initial: ShareSettings;
+  /** o servidor está cheio: resoluções acima disso ficam travadas */
+  maxResolution?: ResolutionId;
   /** gravar a própria tela só para clipes, sem transmitir (ligado = true) */
   clipOnly?: { on: boolean; toggle: () => void };
   /** false quando o servidor de voz é próprio (sem franquia de GB) */
@@ -114,7 +119,7 @@ export function SharePanel({
   onStart: (s: ShareSettings) => void;
   onClose: () => void;
 }) {
-  const [s, setS] = useState(initial);
+  const [s, setS] = useState(() => ({ ...initial, resolution: clampResolution(initial.resolution, maxResolution) }));
   const up = (p: Partial<ShareSettings>) => setS((v) => ({ ...v, ...p }));
   const mbps = (bitrateFor(s.resolution, s.fps) / 1_000_000).toFixed(1).replace(".0", "").replace(".", ",");
   const watchers = Math.max(1, viewers);
@@ -141,8 +146,18 @@ export function SharePanel({
           label="Resolução"
           value={s.resolution}
           onChange={(resolution) => up({ resolution })}
-          options={(Object.keys(RESOLUTIONS) as ResolutionId[]).map((r) => ({ value: r, label: RESOLUTIONS[r].label }))}
+          options={(Object.keys(RESOLUTIONS) as ResolutionId[]).map((r) => ({
+            value: r,
+            label: RESOLUTIONS[r].label,
+            disabled: aboveCap(r, maxResolution),
+            title: aboveCap(r, maxResolution) ? "O servidor está cheio agora. Libera de novo quando aliviar." : undefined,
+          }))}
         />
+        {maxResolution !== "2160p" && (
+          <p className="mt-1.5 text-[11.5px] leading-snug text-[#f0b232]">
+            Servidor movimentado: agora vai até {RESOLUTIONS[maxResolution].label}. Quando aliviar, libera mais.
+          </p>
+        )}
         <div className="mt-2">
           <Segmented
             label="Quadros por segundo"
