@@ -85,3 +85,137 @@ export async function fetchState(api, secret, { timeoutMs = 5000, fetchImpl = fe
   if (!r.ok) throw new Error(`API respondeu ${r.status}`);
   return r.json();
 }
+
+/**
+ * Quem manda nas pontes. A cada volta pergunta à API e aplica o plan().
+ *
+ * Fecha por falta de confirmação (fail-closed): a ponte só continua ligada enquanto a API confirma a ligação.
+ * Passou de staleMs sem uma resposta válida, fecha todas (inclusive as que ainda estão entrando) e só volta
+ * a abrir com uma resposta nova. O check() roda num relógio próprio, então fecha mesmo se a API ou uma
+ * abertura estiver travada.
+ *
+ * Aberturas não seguram a volta: cada uma corre por conta própria, e a reconciliação das outras pontes
+ * continua a cada volta.
+ */
+export class Reconciler {
+  /**
+   * @param {object} o
+   * @param {() => Promise<{links?: object[]}>} o.fetchState
+   * @param {(link: object, cb: {onClose: () => void}) => Promise<{start: () => Promise<void>, stop: () => Promise<void>}>} o.makeBridge
+   * @param {number} o.graceMs           lado vazio por este tempo: fecha
+   * @param {number} o.staleMs           sem confirmação da API por este tempo: fecha tudo
+   * @param {number} o.startTimeoutMs    prazo para entrar nos dois lados
+   * @param {number} [o.stopTimeoutMs]   prazo para sair (a ponte já saiu do mapa antes disso)
+   * @param {number} [o.retryMs]         depois de falhar ao abrir, espera isto
+   * @param {() => number} [o.now]
+   * @param {(...a: unknown[]) => void} [o.log]
+   */
+  constructor({ fetchState, makeBridge, graceMs, staleMs, startTimeoutMs, stopTimeoutMs = 5000, retryMs = 30_000, now = Date.now, log = () => {} }) {
+    Object.assign(this, { fetchState, makeBridge, graceMs, staleMs, startTimeoutMs, stopTimeoutMs, retryMs, now, log });
+    /** @type {Map<string, {link: object, idleSince: number | null, bridge: object | null, closed: boolean, ready: boolean}>} */
+    this.bridges = new Map();
+    this.retryAt = new Map();
+    this.waitingLogged = new Map();
+    /** quando a API respondeu bem pela última vez (null: nunca) */
+    this.lastOkAt = null;
+    this.failures = 0;
+  }
+
+  /** A última resposta da API ainda vale? */
+  fresh() {
+    return this.lastOkAt !== null && this.now() - this.lastOkAt <= this.staleMs;
+  }
+
+  /** Uma volta: pergunta, fecha o que saiu, dispara o que entrou (sem esperar). */
+  async tick() {
+    let s;
+    try {
+      s = await this.fetchState();
+      if (!s || !Array.isArray(s.links)) throw new Error("resposta sem a lista de ligações");
+    } catch (e) {
+      this.failures += 1;
+      if (this.failures === 1 || this.failures % 10 === 0) this.log(`não consegui falar com a API (${e.message}; ${this.failures}ª falha seguida)`);
+      this.check();
+      return;
+    }
+    if (this.failures) this.log(`API voltou depois de ${this.failures} falha(s)`);
+    this.failures = 0;
+    this.lastOkAt = this.now();
+    const todo = plan(s.links, this.bridges, { now: this.now(), retryAt: this.retryAt, graceMs: this.graceMs });
+    // fecha antes de abrir: libera o bot no servidor do Discord e para o áudio no destino velho
+    await Promise.allSettled(todo.close.map(({ id, why }) => this.close(id, why)));
+    for (const link of todo.open) {
+      this.waitingLogged.delete(link.channel_id);
+      void this.open(link);
+    }
+    for (const { link, holder } of todo.waiting) {
+      if (this.waitingLogged.get(link.channel_id) === holder) continue;
+      this.waitingLogged.set(link.channel_id, holder);
+      this.log(`call ${link.channel_id}: esperando, o bot já está na call ${holder} do mesmo servidor do Discord`);
+    }
+  }
+
+  /** Sem confirmação da API há tempo demais: fecha tudo. Devolve quantas fechou. */
+  check() {
+    if (this.fresh() || !this.bridges.size) return 0;
+    const ids = [...this.bridges.keys()];
+    const age = this.lastOkAt === null ? "nunca respondeu" : `${Math.round((this.now() - this.lastOkAt) / 1000)} s sem resposta`;
+    this.log(`API sem confirmar as ligações (${age}): desligando ${ids.length} ponte(s) até ela voltar`);
+    for (const id of ids) void this.close(id, "API sem confirmar a ligação");
+    return ids.length;
+  }
+
+  async open(link) {
+    const id = link.channel_id;
+    const entry = { link, idleSince: null, bridge: null, closed: false, ready: false };
+    this.bridges.set(id, entry);
+    try {
+      const bridge = await this.makeBridge(link, {
+        onClose: () => {
+          // só fecha a ponte desta entrada (a call pode já ter uma ponte nova para outro destino)
+          if (this.bridges.get(id) !== entry) return;
+          this.log(`call ${id}: um dos lados caiu; tento de novo na próxima volta`);
+          void this.close(id, "um dos lados caiu");
+        },
+      });
+      entry.bridge = bridge;
+      if (entry.closed) throw new Error("desligada enquanto preparava");
+      await withTimeout(bridge.start(), this.startTimeoutMs, "entrar na call");
+      // entrou, mas o mundo pode ter mudado enquanto entrava
+      if (entry.closed) throw new Error("desligada enquanto entrava");
+      if (!this.fresh()) throw new Error("a API parou de confirmar enquanto entrava");
+      entry.ready = true;
+      this.log(`call ${id}: ponte ligada (${link.app_people} aqui, ${link.discord_people} no Discord)`);
+    } catch (e) {
+      const mine = this.bridges.get(id) === entry;
+      if (mine) this.bridges.delete(id);
+      const wasClosed = entry.closed;
+      entry.closed = true;
+      await this.stopBridge(entry);
+      // desligada de propósito (ligação desfeita, API sumiu): não é falha, não precisa esperar para tentar de novo
+      if (mine && !wasClosed) {
+        this.retryAt.set(id, this.now() + this.retryMs);
+        this.log(`call ${id}: não deu para ligar (${e.message}); tento de novo em ${Math.round(this.retryMs / 1000)} s`);
+      }
+    }
+  }
+
+  async close(id, why = "") {
+    const entry = this.bridges.get(id);
+    if (!entry) return;
+    // sai do mapa na hora: o estado já é "desligada", mesmo que a saída demore
+    this.bridges.delete(id);
+    entry.closed = true;
+    await this.stopBridge(entry);
+    this.log(`call ${id}: ponte desligada${why ? ` (${why})` : ""}`);
+  }
+
+  async closeAll(why) {
+    await Promise.allSettled([...this.bridges.keys()].map((id) => this.close(id, why)));
+  }
+
+  async stopBridge(entry) {
+    if (!entry.bridge) return;
+    await withTimeout(entry.bridge.stop(), this.stopTimeoutMs, "sair da call").catch((e) => this.log(`saída demorou (${e.message})`));
+  }
+}
