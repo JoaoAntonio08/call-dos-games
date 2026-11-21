@@ -96,18 +96,20 @@ sudo chmod 600 .env.local
 - Nada para instalar.
 - Limite: a banda mensal do plano grátis (compartilhar tela em 4K gasta bastante).
 
-**B) LiveKit próprio no servidor** não tem limite de banda, mas precisa de portas abertas:
+**B) LiveKit próprio no servidor** (recomendado) não tem limite de banda nem franquia que acaba no meio do mês. Antes, uma vez:
+
+1. **Cloudflare:** crie o registro `A` de `voz-call` apontando para o IP da casa, com a **nuvem cinza (DNS only)**. A Cloudflare não carrega o tráfego UDP da call.
+2. **Roteador / firewall:** abra **TCP 443, TCP 7881 e UDP 50000–50200** para esta máquina.
+
+Depois, um comando só faz o resto (instala o `livekit-server`, gera chave e segredo, cria o serviço, põe o `voz-call` no Caddy e troca os dois `.env`, guardando cópia `*.antes-livekit-proprio` de tudo que muda):
 
 ```bash
-curl -sSL https://get.livekit.io | bash                                # instala /usr/local/bin/livekit-server
-sudo cp /opt/calldosgames/app/backend/deploy/livekit.yaml /etc/livekit.yaml   # e troque o segredo dentro dele
-sudo cp /opt/calldosgames/app/backend/deploy/livekit.service /etc/systemd/system/
-sudo systemctl enable --now livekit
+sudo bash /opt/calldosgames/app/backend/scripts/livekit-proprio.sh voz-call.seudominio.com
 ```
 
-- Nos dois `.env`: `LIVEKIT_URL=wss://voz.cdg.exemplo.com`, com a mesma chave e segredo do `livekit.yaml`.
-- **Cloudflare:** o subdomínio `voz` precisa ficar com a **nuvem cinza (DNS only)**. A Cloudflare não carrega o tráfego UDP da call.
-- **Firewall / roteador:** abra **TCP 443, TCP 7881 e UDP 50000–50200** para esta máquina. Se ela estiver atrás de um roteador de casa, redirecione essas portas.
+No fim ele testa o endereço e mostra se a voz respondeu. Para voltar ao Cloud, restaure os `.env` das cópias e reinicie os serviços.
+
+**Qualidade conforme a carga** (só no LiveKit próprio): o servidor mede o uso dele e limita o compartilhamento de tela. Até **50%** de uso libera **4K**; de 50% a 75%, **1080p**; acima de 75%, **720p**. Quem já está transmitindo cai de qualidade sozinho, sem cortar a tela, e volta a poder escolher mais quando a carga baixa. Por padrão conta o processador; para contar também a internet de subida, ponha em `backend/.env` a velocidade de upload da casa em Mbit/s, por exemplo `UPLINK_MBPS=100`.
 
 ## 7. Caddy (HTTPS) e Cloudflare
 

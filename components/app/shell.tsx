@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { useRoute, useUI } from "@/lib/ui";
 import { accentVars } from "@/lib/theme";
+import { tintColor, useLook } from "@/lib/aparencia";
 import { ServerRail } from "./rail";
 import { HomeSidebar, ServerSidebar } from "./sidebars";
 import { UserBar, VoiceBar } from "./user-bar";
@@ -92,6 +93,16 @@ export function Shell() {
     };
   }, [tint]);
 
+  // aparência: estilizado (vidro tingido) ou normal; a cor do vidro é a escolhida, a do perfil ou a do servidor
+  const lookStyle = useLook((s) => s.style);
+  const lookTint = useLook((s) => s.tint);
+  const myAccent = useStore((s) => s.me?.accent);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.look = lookStyle === "estilizado" ? "glass" : "plain";
+    root.style.setProperty("--glass-tint", tintColor(lookTint, tint, myAccent));
+  }, [lookStyle, lookTint, tint, myAccent]);
+
   // título da aba
   useEffect(() => {
     document.title = channel
@@ -152,7 +163,7 @@ export function Shell() {
       <GameReporter />
       <Modals />
       {toastMsg && (
-        <div key={toastMsg.id} role="status" className="slide-in fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">
+        <div key={toastMsg.id} role="status" className="slide-in glass-float toast-glass fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">
           {toastMsg.text}
         </div>
       )}

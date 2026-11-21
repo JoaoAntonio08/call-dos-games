@@ -172,7 +172,7 @@ export function Modal({
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-3" role="presentation">
       <div className="absolute inset-0 bg-cocoa-0/75" onClick={onClose} />
-      <div role="dialog" aria-modal aria-label={label} className={`pop-in relative max-h-[calc(100svh-24px)] overflow-y-auto rounded-[18px] bg-cocoa-2 ${className}`}>
+      <div role="dialog" aria-modal aria-label={label} className={`pop-in glass-float relative max-h-[calc(100svh-24px)] overflow-y-auto rounded-[18px] bg-cocoa-2 ${className}`}>
         {children}
       </div>
     </div>,

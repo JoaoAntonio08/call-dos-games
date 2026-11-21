@@ -18,6 +18,8 @@ import { ChannelAccess, MemberRoles, RolesTab } from "./cargos";
 import { BotBuilder } from "./bot-builder";
 import { NotificationsTab } from "./avisos";
 import { PlatformTab, UsageTab } from "./uso";
+import { tintColor, useLook, type LookStyle } from "@/lib/aparencia";
+import { LogoMark } from "./intro";
 import { Room } from "livekit-client";
 
 export function Modals() {
@@ -352,6 +354,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         ["voz", "Voz e vídeo"],
         ["jogos", "Jogos"],
         ["avisos", "Notificações"],
+        ["aparencia", "Aparência"],
         ["conta", "Conta"],
         ...(hasDesktopApp() ? ([["app", "App de Windows"]] as [string, string][]) : []),
         ...(platform ? ([["plataforma", "Plataforma"]] as [string, string][]) : []),
@@ -380,6 +383,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
       )}
       {tab === "conta" && <AccountTab />}
       {tab === "avisos" && <NotificationsTab />}
+      {tab === "aparencia" && <LookTab />}
       {tab === "app" && (
         <div className="max-w-xl">
           <H>App de Windows</H>
@@ -388,6 +392,82 @@ function UserSettings({ tab: initial }: { tab?: string }) {
       )}
       {tab === "plataforma" && platform && <PlatformTab />}
     </SettingsFrame>
+  );
+}
+
+/** Estilizado (vidro tingido + entrada animada) ou Normal (sólido), e a cor do vidro. Fica neste aparelho. */
+function LookTab() {
+  const look = useLook();
+  const me = useStore((s) => s.me);
+  // "do servidor": a cor que o app já aplicou (depende do servidor aberto)
+  const color = look.tint === "servidor" ? "var(--glass-tint)" : tintColor(look.tint, undefined, me?.accent);
+  const styles: [LookStyle, string, string][] = [
+    ["estilizado", "Estilizado", "Painéis de vidro na cor escolhida, fundo com brilho suave e entrada animada."],
+    ["normal", "Normal", "O visual sólido de sempre, sem transparência. Mais leve em PC fraco."],
+  ];
+  const tints: [string, string][] = [
+    ["servidor", "Do servidor aberto"],
+    ["perfil", "Da minha cor de perfil"],
+  ];
+  return (
+    <div className="max-w-xl">
+      <H>Aparência</H>
+      <Section title="Estilo" hint="Vale só neste aparelho.">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {styles.map(([id, name, text]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={look.style === id}
+              onClick={() => look.set({ style: id })}
+              className={`press rounded-[12px] border p-3 text-left ${look.style === id ? "border-oat/40 bg-cocoa-4" : "border-oat/10 hover:bg-cocoa-3"}`}
+            >
+              <span
+                className="mb-2 block h-14 rounded-[9px]"
+                style={
+                  id === "estilizado"
+                    ? {
+                        background: `radial-gradient(120% 90% at 20% 10%, color-mix(in srgb, ${color} 40%, transparent), transparent 60%), linear-gradient(135deg, color-mix(in srgb, ${color} 20%, transparent), #1e1f22)`,
+                        boxShadow: "inset 0 1px 0 rgba(255,255,255,.18)",
+                      }
+                    : { background: "#2b2d31" }
+                }
+              />
+              <span className="block text-[14.5px] font-medium">{name}</span>
+              <span className="text-[12.5px] text-oat/50">{text}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+      <Section title="Cor do vidro">
+        <div className="mb-3 flex flex-wrap gap-2">
+          {tints.map(([id, name]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={look.tint === id}
+              onClick={() => look.set({ tint: id as "servidor" | "perfil" })}
+              className={`press h-9 rounded-[9px] px-3 text-[13.5px] ${look.tint === id ? "bg-cocoa-4 text-oat" : "bg-cocoa-3 text-oat/70 hover:text-oat"}`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+        <Swatches value={look.tint.startsWith("#") ? look.tint : ""} colors={ACCENTS} onPick={(c) => look.set({ tint: c as `#${string}` })} />
+      </Section>
+      <Section title="Entrada">
+        <label className="flex items-center justify-between gap-4 py-1">
+          <span>
+            <span className="block text-[14.5px] font-medium">Animação ao abrir</span>
+            <span className="text-[12.5px] text-oat/50">Uma vez por abertura. Clique ou aperte uma tecla para pular.</span>
+          </span>
+          <Toggle checked={look.intro} onChange={(x) => look.set({ intro: x })} label="Animação ao abrir" />
+        </label>
+        <button type="button" onClick={() => look.playIntro()} className="press mt-3 flex h-9 items-center gap-2 rounded-[9px] bg-cocoa-3 px-3 text-[13.5px] hover:bg-cocoa-4">
+          <LogoMark tint={color} className="size-5" /> Ver a animação
+        </button>
+      </Section>
+    </div>
   );
 }
 

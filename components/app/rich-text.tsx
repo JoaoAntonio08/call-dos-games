@@ -82,6 +82,21 @@ const INLINE: { re: RegExp; render: (m: RegExpExecArray, ctx: Ctx, key: string) 
     },
   },
   {
+    // emoji próprio de um servidor do Discord (chega pela ponte): a imagem vem do CDN do Discord
+    re: /<(a?):(\w{2,32}):(\d{15,25})>/,
+    render: (m, _c, k) => (
+      <img
+        key={k}
+        src={`https://cdn.discordapp.com/emojis/${m[3]}.${m[1] ? "gif" : "webp"}?size=48&quality=lossless`}
+        alt={`:${m[2]}:`}
+        title={`:${m[2]}:`}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        className="mx-px inline-block size-[1.4em] -translate-y-[0.1em] object-contain align-middle"
+      />
+    ),
+  },
+  {
     re: /:([a-z0-9_]{2,32}):/,
     render: (m, c, k) => {
       const e = c.emojis.find((x) => x.name === m[1].toLowerCase());
@@ -146,7 +161,7 @@ export function RichText({ text, emojis = [], meUsername, onMention }: { text: s
 export function isJumbo(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 60) return false;
-  const stripped = t.replace(/:[a-z0-9_]{2,32}:/g, "").replace(/\p{Extended_Pictographic}|\p{Emoji_Component}|️|‍|\s/gu, "");
-  const count = (t.match(/:[a-z0-9_]{2,32}:|\p{Extended_Pictographic}/gu) ?? []).length;
+  const stripped = t.replace(/<a?:\w{2,32}:\d{15,25}>/g, "").replace(/:[a-z0-9_]{2,32}:/g, "").replace(/\p{Extended_Pictographic}|\p{Emoji_Component}|️|‍|\s/gu, "");
+  const count = (t.match(/<a?:\w{2,32}:\d{15,25}>|:[a-z0-9_]{2,32}:|\p{Extended_Pictographic}/gu) ?? []).length;
   return stripped === "" && count > 0 && count <= 6;
 }

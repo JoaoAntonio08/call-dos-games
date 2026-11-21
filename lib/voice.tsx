@@ -4,10 +4,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { RoomEvent, Track, type RemoteParticipant } from "livekit-client";
 import { api, upload } from "./api";
 import { gateway, loadQueue, nameInChannel, setQueue, useNameInChannel, useStore } from "./store";
-import { OWN_AUDIO_OFF, useCall, type Call, type PeerMeta } from "./use-call";
+import { OWN_AUDIO_OFF, RESOLUTIONS, useCall, type Call, type PeerMeta, type ResolutionId } from "./use-call";
 import { useYouTubeSync } from "./use-youtube-sync";
 import { useClipper } from "./clipper";
 import { toast } from "./ui";
+import { applyBoardMsg, leadsBoard, type BoardMsg, type Stroke } from "./board";
 import type { Attachment, NowPlaying, QueueItem, Sound } from "./types";
 import { TrackAudio } from "@/components/room/media";
 
@@ -82,12 +83,7 @@ function playUrl(url: string, volume: number) {
 /* atividades                                                          */
 /* ------------------------------------------------------------------ */
 
-export interface Stroke {
-  id: string;
-  color: string;
-  size: number;
-  pts: number[]; // x0,y0,x1,y1… normalizados 0..1
-}
+export type { Stroke } from "./board";
 
 export interface Spin {
   id: string;
@@ -142,7 +138,14 @@ interface VoiceCtx {
   playSound: (s: Sound) => void;
   react: (emoji: string) => void;
   addStroke: (s: Stroke) => void;
-  clearBoard: () => void;
+  /** apaga esses traços (os seus; quem lidera a call apaga de qualquer um) */
+  eraseStrokes: (ids: string[]) => void;
+  /** "mine" tira só os seus traços; "all" (só quem lidera) limpa a lousa toda */
+  clearBoard: (scope: "mine" | "all") => void;
+  /** você lidera esta call: dono, admin ou cargo com "Moderar call" */
+  boardLeader: boolean;
+  /** seu id, para a lousa saber o que é seu */
+  myId: string;
   startSpin: (options: string[]) => void;
   /** fila de vídeos do canal da call */
   queue: QueueItem[];
@@ -161,6 +164,12 @@ interface VoiceCtx {
     ownScreen: boolean;
     toggleOwnScreen: () => Promise<void>;
   };
+}
+
+/** Servidor da sala do LiveKit ("cdg-<id do canal>"); conversa privada não tem. */
+function serverOfRoom(roomName: string) {
+  const cid = roomName.replace(/^cdg-/, "");
+  return Object.values(useStore.getState().servers).find((x) => x.channels.some((c) => c.id === cid));
 }
 
 const Ctx = createContext<VoiceCtx | null>(null);
@@ -290,7 +299,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       }
       setJoining(cid);
       const p = prefsRef.current;
-      const ok = await call.join(() => api<{ token: string; url: string }>("/voice/token", { json: { channel_id: cid } }), {
+      const ok = await call.join(() => api<{ token: string; url: string; quality?: { max_resolution?: string } }>("/voice/token", { json: { channel_id: cid } }), {
         mic: !p.ptt && !p.startMuted,
         camera: false,
         quiet: true,
@@ -329,6 +338,26 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (call.endReason === "elsewhere") toast("Você entrou nessa call em outro aparelho, então saiu por aqui.");
   }, [call.endReason]);
+
+  // a call caiu sozinha (servidor de voz parou, internet caiu): avisa em qualquer tela, sem texto técnico
+  useEffect(() => {
+    if (call.status === "disconnected" && call.problem) toast(`${call.problem.title}. ${call.problem.text}`);
+  }, [call.status, call.problem]);
+
+  // LiveKit próprio: a cada 20 s vê até que resolução o servidor aguenta (cheio → baixa a tela de quem transmite)
+  const livekitCloud = useStore((s) => s.livekitCloud);
+  const setShareCap = call.setShareCap;
+  useEffect(() => {
+    if (call.status !== "connected" || livekitCloud) return;
+    const t = window.setInterval(() => {
+      api<{ max_resolution?: string }>("/voice/quality")
+        .then((q) => {
+          if (q.max_resolution && q.max_resolution in RESOLUTIONS) void setShareCap(q.max_resolution as ResolutionId);
+        })
+        .catch(() => {});
+    }, 20_000);
+    return () => window.clearInterval(t);
+  }, [call.status, livekitCloud, setShareCap]);
 
   /* ---------------- o que um admin decidiu para você ---------------- */
   const here = useStore((s) => (channelId ? s.voice[channelId] : undefined));
@@ -534,9 +563,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       } else if (topic === "react" && typeof msg.emoji === "string") {
         pushReaction(msg.emoji.slice(0, 16), name);
       } else if (topic === "board") {
-        if (msg.type === "stroke") setStrokes((s) => (s.some((x) => x.id === (msg.stroke as Stroke).id) ? s : [...s, msg.stroke as Stroke]));
-        else if (msg.type === "clear") setStrokes([]);
-        else if (msg.type === "req" && strokesRef.current.length) {
+        if (p && (msg.type === "stroke" || msg.type === "erase" || msg.type === "clear")) {
+          // quem recebe confere: apagar o dos outros só vale se quem mandou lidera a call
+          const leads = leadsBoard(serverOfRoom(room.name), p.identity);
+          setStrokes((s) => applyBoardMsg(s, msg as unknown as BoardMsg, p.identity, leads));
+        } else if (msg.type === "req" && strokesRef.current.length) {
           // responde com um atraso aleatório; quem responder primeiro basta
           window.setTimeout(() => {
             if (gotSync) return;
@@ -579,10 +610,24 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     },
     [publish],
   );
-  const clearBoard = useCallback(() => {
-    setStrokes([]);
-    publish("board", { type: "clear" });
-  }, [publish]);
+  const myId = me?.id ?? "";
+  const boardLeader = useStore((s) => leadsBoard(channelId ? Object.values(s.servers).find((x) => x.channels.some((c) => c.id === channelId)) : undefined, s.me?.id));
+  const eraseStrokes = useCallback(
+    (ids: string[]) => {
+      if (!ids.length) return;
+      setStrokes((cur) => applyBoardMsg(cur, { type: "erase", ids }, myId, boardLeader));
+      publish("board", { type: "erase", ids });
+    },
+    [publish, myId, boardLeader],
+  );
+  const clearBoard = useCallback(
+    (scope: "mine" | "all") => {
+      const all = scope === "all" && boardLeader;
+      setStrokes((cur) => applyBoardMsg(cur, { type: "clear", scope: all ? "all" : "mine" }, myId, boardLeader));
+      publish("board", { type: "clear", scope: all ? "all" : "mine" });
+    },
+    [publish, myId, boardLeader],
+  );
 
   const startSpin = useCallback(
     (options: string[]) => {
@@ -827,14 +872,17 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       playSound,
       react,
       addStroke,
+      eraseStrokes,
       clearBoard,
+      boardLeader,
+      myId,
       startSpin,
       queue,
       playQueued,
       isDj,
       clip,
     }),
-    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, clearBoard, startSpin, queue, playQueued, isDj, clip, noShare],
+    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, eraseStrokes, clearBoard, boardLeader, myId, startSpin, queue, playQueued, isDj, clip, noShare],
   );
 
   return (

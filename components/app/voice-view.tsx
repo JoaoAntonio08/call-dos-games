@@ -22,6 +22,7 @@ import {
   Smile,
   Sparkles,
   TvMinimalPlay,
+  WifiOff,
   Video,
   VideoOff,
   Volume2,
@@ -30,7 +31,9 @@ import {
 import { isUnread, nameInChannel, useNameInServer, useStore, useUser } from "@/lib/store";
 import { openModal, openUserMenu, toast, toggleUI, useUI } from "@/lib/ui";
 import { useVoice, type Spin, type Stroke } from "@/lib/voice";
+import { hitByEraser } from "@/lib/board";
 import { DEFAULT_SHARE, RESOLUTIONS, type Peer, type ShareSettings } from "@/lib/use-call";
+import type { CallProblem } from "@/lib/call-errors";
 import { loadJSON, saveJSON } from "@/lib/prefs";
 import { durationOf } from "@/lib/format";
 import type { Channel, Server, Sound } from "@/lib/types";
@@ -129,7 +132,9 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
                 O servidor de voz ainda não foi configurado (LIVEKIT_URL, LIVEKIT_API_KEY e LIVEKIT_API_SECRET no backend).
               </p>
             )}
-            {v.call.status === "error" && v.call.error && <p className="mt-5 rounded-[12px] bg-rust/15 px-4 py-3 text-[13.5px] text-[#ffb1b3]">{v.call.error}</p>}
+            {v.call.problem && (v.call.status === "error" || v.call.status === "disconnected") && (
+              <CallProblemCard problem={v.call.problem} busy={!!v.joining} onRetry={v.call.problem.retry && livekit ? () => void v.join(channel.id) : undefined} />
+            )}
             <button type="button" disabled={!!v.joining || !livekit} onClick={() => void v.join(channel.id)} className="btn-ember mt-7 h-12 px-8 text-[16px]">
               {v.joining === channel.id ? "Conectando…" : v.channelId ? "Trocar para esta call" : "Entrar na call"}
             </button>
@@ -370,6 +375,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
                 initial={share}
                 viewers={n - 1}
                 freeTier={livekitCloud}
+                maxResolution={call.shareCap}
                 clipOnly={
                   v.prefs.clipBuffer && v.clip.supported
                     ? {
@@ -698,8 +704,34 @@ function ReactPanel({ onPick }: { onPick: (e: string) => void }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* quando a call não conecta ou cai                                    */
+/* ------------------------------------------------------------------ */
+
+function CallProblemCard({ problem, busy, onRetry }: { problem: CallProblem; busy: boolean; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="glass enter-pop mt-6 flex items-start gap-3 rounded-[18px] px-4 py-3.5 text-left">
+      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-rust/20 text-[#ffb1b3]">
+        <WifiOff className="size-[18px]" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[14.5px] font-semibold text-oat">{problem.title}</p>
+        <p className="mt-0.5 text-[13px] leading-snug text-oat/65">{problem.text}</p>
+        {onRetry && (
+          <button type="button" disabled={busy} onClick={onRetry} className="press mt-2.5 rounded-full bg-oat/10 px-3 py-1.5 text-[12.5px] font-semibold text-oat hover:bg-oat/15 disabled:opacity-50">
+            {busy ? "Conectando…" : "Tentar de novo"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* quadro compartilhado                                                */
 /* ------------------------------------------------------------------ */
+
+// cursor da borracha: um círculo do tamanho da área que ela apaga
+const ERASER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="11" fill="rgba(242,243,245,.18)" stroke="#f2f3f5" stroke-width="1.5"/></svg>')}") 14 14, cell`;
 
 const INKS = ["#f2f3f5", "#5865f2", "#f0b232", "#23a55a", "#00a8fc", "#eb459e", "#111214"];
 
@@ -709,7 +741,16 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [color, setColor] = useState(INKS[1]);
   const [size, setSize] = useState(4);
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
   const current = useRef<Stroke | null>(null);
+  const erasing = useRef(false);
+  const ERASER = 0.022; // raio da borracha (fração da largura da lousa)
+  const rub = (e: React.PointerEvent) => {
+    const [x, y] = point(e);
+    const ids = hitByEraser(v.strokes, x, y, ERASER, v.myId, v.boardLeader);
+    if (ids.length) v.eraseStrokes(ids);
+  };
+  const mine = v.strokes.some((s) => s.by === v.myId);
 
   const draw = useMemo(
     () => (ctx: CanvasRenderingContext2D, s: Stroke, w: number, h: number) => {
@@ -769,13 +810,19 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
       <canvas
         ref={canvas}
         className="touch-none rounded-[12px] bg-cocoa-3"
-        style={{ cursor: "crosshair", backgroundImage: "radial-gradient(color-mix(in srgb, var(--color-oat) 9%, transparent) 1px, transparent 1px)", backgroundSize: "22px 22px" }}
+        style={{ cursor: tool === "eraser" ? ERASER_CURSOR : "crosshair", backgroundImage: "radial-gradient(color-mix(in srgb, var(--color-oat) 9%, transparent) 1px, transparent 1px)", backgroundSize: "22px 22px" }}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
-          current.current = { id: Math.random().toString(36).slice(2), color, size, pts: point(e) };
+          if (tool === "eraser") {
+            erasing.current = true;
+            rub(e);
+            return;
+          }
+          current.current = { id: Math.random().toString(36).slice(2), color, size, pts: point(e), by: v.myId };
           redraw();
         }}
         onPointerMove={(e) => {
+          if (erasing.current) return rub(e);
           const s = current.current;
           if (!s) return;
           const [x, y] = point(e);
@@ -786,6 +833,7 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
           redraw();
         }}
         onPointerUp={() => {
+          erasing.current = false;
           const s = current.current;
           current.current = null;
           if (s) v.addStroke(s);
@@ -793,18 +841,51 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
       />
       <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-cocoa-0/90 px-2 py-1.5">
         {INKS.map((c) => (
-          <button key={c} type="button" aria-label={`Cor ${c}`} onClick={() => setColor(c)} className="press size-6 rounded-full" style={{ background: c, boxShadow: color === c ? "0 0 0 2px var(--color-cocoa-0), 0 0 0 4px var(--color-oat)" : undefined }} />
+          <button
+            key={c}
+            type="button"
+            aria-label={`Cor ${c}`}
+            onClick={() => (setColor(c), setTool("pen"))}
+            className="press size-6 rounded-full"
+            style={{ background: c, boxShadow: tool === "pen" && color === c ? "0 0 0 2px var(--color-cocoa-0), 0 0 0 4px var(--color-oat)" : undefined }}
+          />
         ))}
         <span className="mx-1 h-5 w-px bg-oat/15" />
         {[3, 7, 14].map((s) => (
-          <button key={s} type="button" aria-label={`Espessura ${s}`} onClick={() => setSize(s)} className={`press grid size-7 place-items-center rounded-full ${size === s ? "bg-cocoa-4" : ""}`}>
+          <button key={s} type="button" aria-label={`Espessura ${s}`} onClick={() => (setSize(s), setTool("pen"))} className={`press grid size-7 place-items-center rounded-full ${tool === "pen" && size === s ? "bg-cocoa-4" : ""}`}>
             <span className="rounded-full bg-oat" style={{ width: s / 1.4 + 2, height: s / 1.4 + 2 }} />
           </button>
         ))}
         <span className="mx-1 h-5 w-px bg-oat/15" />
-        <button type="button" onClick={() => confirm("Limpar o quadro para todo mundo?") && v.clearBoard()} className="press flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-semibold text-oat/70 hover:text-oat" title="Limpar">
-          <Eraser className="size-3.5" /> Limpar
+        <button
+          type="button"
+          aria-pressed={tool === "eraser"}
+          onClick={() => setTool((t) => (t === "eraser" ? "pen" : "eraser"))}
+          className={`press flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-semibold ${tool === "eraser" ? "bg-oat text-cocoa-0" : "text-oat/70 hover:text-oat"}`}
+          title={v.boardLeader ? "Borracha (você lidera a call: apaga de qualquer um)" : "Borracha: apaga só o que você desenhou"}
+        >
+          <Eraser className="size-3.5" /> Borracha
         </button>
+        <button
+          type="button"
+          disabled={!mine}
+          onClick={() => v.clearBoard("mine")}
+          className="press rounded-full px-2 py-1 text-[12px] font-semibold text-oat/70 hover:text-oat disabled:opacity-35"
+          title="Apaga tudo o que você desenhou (o dos outros fica)"
+        >
+          Limpar o meu
+        </button>
+        {v.boardLeader && (
+          <button
+            type="button"
+            disabled={!v.strokes.length}
+            onClick={() => confirm("Limpar a lousa inteira, de todo mundo?") && v.clearBoard("all")}
+            className="press rounded-full px-2 py-1 text-[12px] font-semibold text-[#ffb1b3] hover:text-[#ffd0d1] disabled:opacity-35"
+            title="Você lidera a call: apaga o desenho de todo mundo"
+          >
+            Limpar tudo
+          </button>
+        )}
         <button type="button" onClick={onClose} className="press rounded-full px-2 py-1 text-[12px] font-semibold text-oat/50 hover:text-oat">
           Fechar
         </button>

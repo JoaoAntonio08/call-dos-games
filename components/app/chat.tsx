@@ -9,7 +9,7 @@ import { idGt, loadMessages, markRead, sendMessage, sendTyping, useStore, useUse
 import { openProfile, toast, useUI } from "@/lib/ui";
 import { useVoice } from "@/lib/voice";
 import { dayOf, isSameDay, sizeOf, stampOf, timeOf } from "@/lib/format";
-import type { Attachment, Channel, CustomEmoji, Dm, Member, Message, Server, User } from "@/lib/types";
+import type { Attachment, Channel, CustomEmoji, Dm, Embed, Member, Message, Server, User } from "@/lib/types";
 import { useTicker } from "@/components/room/media";
 import { Avatar, Popover, useAnchor } from "./bits";
 import { EmojiPicker, QUICK_REACTIONS } from "./emoji-picker";
@@ -453,6 +453,13 @@ const MessageItem = memo(function MessageItem({
               ))}
             </div>
           )}
+          {!!msg.embeds?.length && (
+            <div className="mt-1.5 flex flex-col gap-2">
+              {msg.embeds.map((e, i) => (
+                <EmbedCard key={i} e={e} emojis={emojis} />
+              ))}
+            </div>
+          )}
           {msg.reactions.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {msg.reactions.map((r) => (
@@ -563,6 +570,75 @@ function EditBox({ msg, onDone }: { msg: Message; onDone: () => void }) {
         Esc para <button type="button" onClick={onDone} className="text-ember-2 hover:underline">cancelar</button> · Enter para{" "}
         <button type="button" onClick={() => void save()} className="text-ember-2 hover:underline">salvar</button>
       </p>
+    </div>
+  );
+}
+
+/** Cartão de mensagem do Discord, no jeitão de lá: faixa colorida, autor, título, texto, campos, imagem e rodapé. */
+function EmbedCard({ e, emojis }: { e: Embed; emojis: CustomEmoji[] }) {
+  const [big, setBig] = useState(false);
+  const img = e.image;
+  const w = img?.width || 400;
+  const h = img?.height || 260;
+  const scale = Math.min(1, 400 / w, 300 / h);
+  const link = (url: string, children: React.ReactNode, cls = "") =>
+    url ? (
+      <a href={url} target="_blank" rel="noreferrer noopener" className={`hover:underline ${cls}`}>
+        {children}
+      </a>
+    ) : (
+      <span className={cls}>{children}</span>
+    );
+  return (
+    <div className="glass-soft flex max-w-[min(520px,100%)] overflow-hidden rounded-[10px]" style={{ borderLeft: `4px solid ${e.color ?? "color-mix(in srgb, var(--color-oat) 22%, transparent)"}` }}>
+      <div className="min-w-0 flex-1 px-3.5 py-3">
+        {e.provider && <p className="mb-1 text-[11.5px] text-oat/50">{e.provider}</p>}
+        {e.author && (
+          <p className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-oat">
+            {e.author.icon && <img src={e.author.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-6 rounded-full object-cover" />}
+            {link(e.author.url, e.author.name)}
+          </p>
+        )}
+        {e.title && <p className="mb-1 text-[14.5px] font-semibold">{link(e.url, e.title, e.url ? "text-ember-2" : "text-oat")}</p>}
+        {e.description && (
+          <div className="whitespace-pre-wrap break-words text-[13.5px] leading-[1.45] text-oat/85">
+            <RichText text={e.description} emojis={emojis} />
+          </div>
+        )}
+        {e.fields.length > 0 && (
+          <div className="mt-2 grid grid-cols-3 gap-x-4 gap-y-2">
+            {e.fields.map((f, i) => (
+              <div key={i} className={f.inline ? "col-span-1 min-w-0" : "col-span-3"}>
+                <p className="text-[12.5px] font-semibold text-oat">{f.name}</p>
+                <div className="break-words text-[13px] text-oat/80">
+                  <RichText text={f.value} emojis={emojis} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {img && (
+          <>
+            <button type="button" onClick={() => setBig(true)} className="mt-2.5 block overflow-hidden rounded-[8px] bg-cocoa-2" style={{ width: Math.round(w * scale), maxWidth: "100%", aspectRatio: `${w} / ${h}` }}>
+              <img src={img.url} alt={e.title || "imagem"} loading="lazy" referrerPolicy="no-referrer" className="size-full object-cover" />
+            </button>
+            {big && (
+              <div className="fixed inset-0 z-50 grid place-items-center bg-cocoa-0/90 p-6" onClick={() => setBig(false)} role="dialog" aria-label={e.title || "imagem"}>
+                <img src={img.url} alt={e.title || "imagem"} referrerPolicy="no-referrer" className="max-h-full max-w-full rounded-[10px] object-contain" />
+              </div>
+            )}
+          </>
+        )}
+        {e.footer && (
+          <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-oat/50">
+            {e.footer.icon && <img src={e.footer.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-4 rounded-full" />}
+            {e.footer.text}
+          </p>
+        )}
+      </div>
+      {e.thumbnail && !img && (
+        <img src={e.thumbnail.url} alt="" loading="lazy" referrerPolicy="no-referrer" className="m-3 ml-0 size-20 shrink-0 rounded-[8px] object-cover" />
+      )}
     </div>
   );
 }

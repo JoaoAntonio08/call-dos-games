@@ -74,7 +74,7 @@ LIVEKIT_API_KEY=...
 LIVEKIT_API_SECRET=...
 ```
 
-> Transmitir em 4K gasta muita banda do plano grátis do LiveKit Cloud. Veja os limites atuais em <https://livekit.io/pricing>. Para uso pesado, dá para rodar o `livekit-server` num VPS próprio.
+> Transmitir em 4K gasta muita banda do plano grátis do LiveKit Cloud. Veja os limites atuais em <https://livekit.io/pricing>. Para uso pesado, rode o LiveKit no próprio servidor: `backend/scripts/livekit-proprio.sh` faz tudo (veja a seção 6 de [`backend/DEPLOY.md`](backend/DEPLOY.md)), e a qualidade da tela passa a se ajustar à carga do servidor.
 
 ### Testar sem conta (só no seu PC)
 

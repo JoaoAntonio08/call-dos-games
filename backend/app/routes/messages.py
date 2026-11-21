@@ -22,7 +22,7 @@ EPHEMERAL_TTL = timedelta(hours=12)
 
 
 SELECT_MESSAGES = """
-    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name, m.author_avatar, m.author_ext, m.visible_to, m.expires_at,
+    SELECT m.id, m.channel_id, m.content, m.kind, m.attachments, m.embeds, m.reply_to, m.edited_at, m.created_at, m.webhook_id, m.author_name, m.author_avatar, m.author_ext, m.visible_to, m.expires_at,
            u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name, u.bio AS u_bio,
            u.accent AS u_accent, u.status AS u_status, u.custom_status AS u_custom_status, u.pronouns AS u_pronouns,
            u.created_at AS u_created_at, u.avatar_id AS u_avatar_id, av.animated AS u_avatar_animated,
@@ -78,6 +78,11 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
         for a in atts or []:
             if a.get("id"):
                 a["url"] = file_url(int(a["id"]))
+        embeds = json.loads(r["embeds"]) if isinstance(r["embeds"], str) else (r["embeds"] or [])
+        for e in embeds:
+            for part in ("image", "thumbnail"):
+                if (e.get(part) or {}).get("file_id"):
+                    e[part]["url"] = file_url(int(e[part]["file_id"]))
         out.append(
             {
                 "id": sid(r["id"]),
@@ -86,6 +91,7 @@ async def messages_out(rows: list[Any], viewer: int) -> list[dict]:
                 "content": r["content"],
                 "kind": r["kind"],
                 "attachments": atts,
+                "embeds": embeds,
                 "reply_to": replies.get(r["reply_to"]) if r["reply_to"] else None,
                 "reply_missing": bool(r["reply_to"] and r["reply_to"] not in replies),
                 "reactions": by_msg.get(r["id"], []),
@@ -123,14 +129,14 @@ async def emit(channel_id: int, visible_to: int | None, event: str, data: Any) -
 
 async def post_webhook_message(
     channel_id: int, webhook_id: int, name: str, content: str, *, visible_to: int | None = None,
-    avatar: str = "", ext: str = "", attachments: list | None = None,
+    avatar: str = "", ext: str = "", attachments: list | None = None, embeds: list | None = None,
 ) -> dict:
     mid = new_id()
     expires = datetime.now(timezone.utc) + EPHEMERAL_TTL if visible_to is not None else None
     await pool().execute(
-        """INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name, visible_to, expires_at, author_avatar, author_ext, attachments)
-           VALUES ($1,$2,NULL,$3,'default',$4,$5,$6,$7,$8,$9,$10)""",
-        mid, channel_id, content, webhook_id, name, visible_to, expires, avatar, ext, json.dumps(attachments or []),
+        """INSERT INTO messages (id, channel_id, author_id, content, kind, webhook_id, author_name, visible_to, expires_at, author_avatar, author_ext, attachments, embeds)
+           VALUES ($1,$2,NULL,$3,'default',$4,$5,$6,$7,$8,$9,$10,$11)""",
+        mid, channel_id, content, webhook_id, name, visible_to, expires, avatar, ext, json.dumps(attachments or []), json.dumps(embeds or []),
     )
     if visible_to is None:
         await pool().execute("UPDATE channels SET last_message_id = $1 WHERE id = $2", mid, channel_id)

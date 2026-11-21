@@ -147,6 +147,20 @@ export interface Reaction {
   me: boolean;
 }
 
+/** Cartão de uma mensagem que veio do Discord (starboard, avisos de bot, prévia de link). */
+export interface Embed {
+  color: string | null;
+  author: { name: string; icon: string; url: string } | null;
+  title: string;
+  url: string;
+  description: string;
+  fields: { name: string; value: string; inline: boolean }[];
+  image: { url: string; width?: number | null; height?: number | null } | null;
+  thumbnail: { url: string; width?: number | null; height?: number | null } | null;
+  footer: { text: string; icon: string } | null;
+  provider: string;
+}
+
 export interface Message {
   id: string;
   channel_id: string;
@@ -154,6 +168,8 @@ export interface Message {
   content: string;
   kind: "default" | "join" | "system" | "hall" | "hype";
   attachments: Attachment[];
+  /** cartões que vieram do Discord pela ponte */
+  embeds?: Embed[];
   reply_to: { id: string; author_id: string | null; author_name: string; content: string; has_attachments: boolean } | null;
   reply_missing: boolean;
   reactions: Reaction[];
