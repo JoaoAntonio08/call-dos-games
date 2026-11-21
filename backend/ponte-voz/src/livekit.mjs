@@ -5,6 +5,8 @@ import { AccessToken } from "livekit-server-sdk";
 import { CHANNELS, FRAME, RATE, toStereo } from "./mixer.mjs";
 
 export const BRIDGE_IDENTITY = "discord";
+/** Quadros esperando o LiveKit aceitar. Passou disso, descarta (melhor perder 20 ms que acumular atraso). */
+export const MAX_PENDING = 3;
 
 export async function bridgeToken({ key, secret, room }) {
   const t = new AccessToken(key, secret, {
@@ -31,6 +33,8 @@ export class LiveKitSide {
     Object.assign(this, { url, token, onPcm, onEnd, onClose });
     this.closed = false;
     this.readers = new Map();
+    this.pending = 0;
+    this.dropped = 0;
   }
 
   async start() {
@@ -46,6 +50,10 @@ export class LiveKitSide {
       if (!this.closed) this.onClose?.();
     });
     await room.connect(this.url, this.token, { autoSubscribe: true, dynacast: false });
+    if (this.closed) {
+      await room.disconnect().catch(() => {});
+      throw new Error("saiu enquanto entrava no LiveKit");
+    }
     this.source = new AudioSource(RATE, CHANNELS, 1000);
     const track = LocalAudioTrack.createAudioTrack("discord", this.source);
     const opts = new TrackPublishOptions();
@@ -70,10 +78,30 @@ export class LiveKitSide {
     }
   }
 
-  /** Um quadro de 20 ms (estéreo) que veio do Discord. */
+  /**
+   * Um quadro de 20 ms (estéreo) que veio do Discord. O captureFrame só resolve quando o LiveKit aceita o quadro;
+   * se ele estiver atrasado, não empilha promessas sem fim: descarta o quadro e o atraso não cresce.
+   * @returns {boolean} se o quadro foi entregue
+   */
   send(pcm) {
-    if (this.closed || !this.source) return;
-    this.source.captureFrame(new AudioFrame(pcm, RATE, CHANNELS, FRAME)).catch(() => {});
+    if (this.closed || !this.source) return false;
+    if (this.pending >= MAX_PENDING) {
+      this.dropped++;
+      return false;
+    }
+    this.pending++;
+    const done = () => {
+      this.pending--;
+    };
+    let p;
+    try {
+      p = this.source.captureFrame(new AudioFrame(pcm, RATE, CHANNELS, FRAME));
+    } catch {
+      done();
+      return false;
+    }
+    Promise.resolve(p).then(done, done);
+    return true;
   }
 
   async stop() {

@@ -344,8 +344,9 @@ def _dispatch(t: str, d: dict) -> None:
     elif t in ("GUILD_CREATE", "GUILD_UPDATE"):
         g = ponte.guilds.get(str(d["id"]), {})
         new = _guild_from(d)
-        if t == "GUILD_UPDATE":  # não traz a lista de canais
+        if t == "GUILD_UPDATE":  # não traz a lista de canais: mantém nomes e tipos que já sabíamos
             new["channels"] = g.get("channels", {})
+            new["types"] = g.get("types", {})
         ponte.guilds[str(d["id"])] = new
         if t == "GUILD_CREATE":
             gid = str(d["id"])

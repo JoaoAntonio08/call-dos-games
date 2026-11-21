@@ -25,8 +25,12 @@ export class CallBridge {
   async start() {
     try {
       await this.app.start();
+      if (this.stopped) throw new Error("ponte parada enquanto entrava");
       await this.discord.start();
+      if (this.stopped) throw new Error("ponte parada enquanto entrava");
     } catch (e) {
+      // parou no meio (prazo estourou, ligação mudou): garante que nenhum lado fique conectado
+      this.stopped = false;
       await this.stop();
       throw e;
     }

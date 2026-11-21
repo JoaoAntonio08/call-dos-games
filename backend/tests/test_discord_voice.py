@@ -92,6 +92,20 @@ async def test_guild_create_loads_who_is_already_in_call(clean):
     assert dc.discord_voice_snapshot([5, 6]) == {"5": ponte.in_call(link())}
 
 
+def test_guild_update_keeps_channel_types(clean):
+    """GUILD_UPDATE não traz os canais: sem guardar os tipos, a call deixava de ser reconhecida como call."""
+    dc._dispatch("GUILD_CREATE", {
+        "id": GUILD, "name": "Turma", "owner_id": "1", "roles": [],
+        "channels": [{"id": VOICE, "name": "Jogatina", "type": 2}, {"id": TEXT, "name": "geral", "type": 0}],
+        "members": [], "voice_states": [],
+    })
+    dc._dispatch("GUILD_UPDATE", {"id": GUILD, "name": "Turma nova", "owner_id": "1", "roles": []})
+    g = dc.ponte.guilds[GUILD]
+    assert g["name"] == "Turma nova"
+    assert g["channels"] == {VOICE: "Jogatina", TEXT: "geral"}
+    assert g["types"] == {VOICE: 2, TEXT: 0}, "os tipos dos canais continuam lá"
+
+
 @pytest.mark.asyncio
 async def test_codes_go_to_the_right_kind_of_channel(clean, monkeypatch):
     ponte, _ = clean
