@@ -4,7 +4,7 @@ import test from "node:test";
 import { CallBridge } from "../src/bridge.mjs";
 import { LiveKitSide, MAX_PENDING } from "../src/livekit.mjs";
 import { FRAME_LEN } from "../src/mixer.mjs";
-import { fetchState, plan, withTimeout } from "../src/plan.mjs";
+import { Reconciler, fetchState, plan, withTimeout } from "../src/plan.mjs";
 
 const link = (id, o = {}) => ({ channel_id: id, room: `cdg-${id}`, guild_id: "g1", discord_channel_id: `dc${id}`, active: true, ...o });
 const opts = (o = {}) => ({ now: 100_000, retryAt: new Map(), graceMs: 20_000, ...o });
@@ -129,4 +129,168 @@ test("ponte parada enquanto entrava: nenhum lado fica conectado", async () => {
   assert.ok(!calls.includes("discord.start"), "não entra no Discord depois de parada");
   assert.ok(calls.filter((c) => c === "app.stop").length >= 1);
   assert.equal(b.stopClock, undefined, "o relógio nem começou");
+});
+
+// ---- Reconciler: prazo de validade do estado (fail-closed) ----
+
+/** Mundo de mentira: API, relógio e pontes controláveis. */
+function world({ staleMs = 15_000 } = {}) {
+  const w = { t: 0, links: [], apiUp: true, made: [], hang: new Set() };
+  w.r = new Reconciler({
+    now: () => w.t,
+    graceMs: 20_000,
+    staleMs,
+    startTimeoutMs: 45_000,
+    stopTimeoutMs: 50,
+    fetchState: async () => {
+      if (!w.apiUp) throw new Error("API fora");
+      return { links: w.links.map((l) => ({ ...l })) };
+    },
+    makeBridge: async (link) => {
+      const b = { link, started: false, stopped: false, resolve: null };
+      b.start = () =>
+        w.hang.has(link.channel_id)
+          ? new Promise((res) => (b.resolve = () => ((b.started = true), res())))
+          : ((b.started = true), Promise.resolve());
+      b.stop = async () => {
+        b.stopped = true;
+      };
+      w.made.push(b);
+      return b;
+    },
+  });
+  w.live = () => w.made.filter((b) => b.started && !b.stopped).map((b) => b.link.channel_id);
+  return w;
+}
+const settle = () => new Promise((r) => setImmediate(r));
+
+test("API caiu: as pontes ficam até o prazo e desligam depois, sem esperar a API voltar", async () => {
+  const w = world();
+  w.links = [link("1")];
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live(), ["1"]);
+
+  w.apiUp = false;
+  for (const t of [3000, 6000, 9000, 12_000, 15_000]) {
+    w.t = t;
+    await w.r.tick();
+  }
+  assert.deepEqual(w.live(), ["1"], "dentro dos 15 s continua (uma falha passageira não corta a call)");
+
+  w.t = 15_001;
+  assert.equal(w.r.check(), 1, "o relógio próprio fecha sem precisar de volta");
+  await settle();
+  assert.deepEqual(w.live(), []);
+  assert.equal(w.r.bridges.size, 0);
+
+  // falhas seguidas: não reabre com o estado velho
+  for (const t of [18_000, 21_000, 40_000]) {
+    w.t = t;
+    await w.r.tick();
+    await settle();
+  }
+  assert.deepEqual(w.live(), []);
+  assert.equal(w.made.length, 1, "nenhuma ponte nova sem resposta da API");
+
+  // API voltou com a ligação ainda lá: reabre (e não ficou de castigo de 30 s)
+  w.apiUp = true;
+  w.t = 43_000;
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live(), ["1"]);
+});
+
+test("API voltou dizendo que a ligação foi desfeita: não reabre", async () => {
+  const w = world();
+  w.links = [link("1")];
+  await w.r.tick();
+  await settle();
+  w.apiUp = false;
+  w.t = 16_000;
+  w.r.check();
+  await settle();
+  w.links = [];
+  w.apiUp = true;
+  w.t = 19_000;
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live(), []);
+  assert.equal(w.made.length, 1);
+});
+
+test("resposta sem a lista de ligações conta como falha, não como 'nada ligado'", async () => {
+  const w = world();
+  w.links = [link("1")];
+  await w.r.tick();
+  await settle();
+  w.r.fetchState = async () => ({});
+  w.t = 3000;
+  await w.r.tick();
+  assert.deepEqual(w.live(), ["1"]);
+  assert.equal(w.r.failures, 1);
+});
+
+test("ligação removida e trocada de destino desligam na volta seguinte", async () => {
+  const w = world();
+  w.links = [link("1"), link("2", { guild_id: "g2" })];
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live().sort(), ["1", "2"]);
+
+  w.links = [link("2", { guild_id: "g2", discord_channel_id: "outro" })];
+  w.t = 3000;
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live(), [], "a 1 saiu e a 2 trocou de destino: as duas param");
+
+  w.t = 6000;
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live(), ["2"]);
+  assert.equal(w.made.at(-1).link.discord_channel_id, "outro", "reabre no destino novo");
+});
+
+test("abertura travada não segura as outras pontes nem o fechamento", async () => {
+  const w = world();
+  w.hang.add("1");
+  w.links = [link("1"), link("2", { guild_id: "g2" })];
+  await w.r.tick(); // volta termina mesmo com a 1 presa entrando
+  await settle();
+  assert.deepEqual(w.live(), ["2"]);
+
+  // na volta seguinte a 2 foi desfeita: desliga já, sem esperar a 1 terminar de entrar
+  w.links = [link("1")];
+  w.t = 3000;
+  await w.r.tick();
+  await settle();
+  assert.deepEqual(w.live(), []);
+  assert.ok(w.made.find((b) => b.link.channel_id === "2").stopped);
+
+  // API some com a 1 ainda entrando: o relógio próprio desliga a que está entrando
+  w.apiUp = false;
+  w.t = 19_000;
+  assert.equal(w.r.check(), 1);
+  await settle();
+  const b1 = w.made.find((b) => b.link.channel_id === "1");
+  assert.ok(b1.stopped, "saiu dos dois lados");
+  b1.resolve(); // a entrada termina depois: não pode ficar ligada
+  await settle();
+  await settle();
+  assert.equal(w.r.bridges.size, 0);
+});
+
+test("entrou depois que a API parou de confirmar: desliga na hora", async () => {
+  const w = world();
+  w.hang.add("1");
+  w.links = [link("1")];
+  await w.r.tick();
+  await settle();
+  const b = w.made[0];
+  w.t = 16_000; // sem nova resposta, e o check() ainda não rodou
+  b.resolve();
+  await settle();
+  await settle();
+  assert.ok(b.stopped);
+  assert.equal(w.r.bridges.size, 0);
 });

@@ -45,6 +45,7 @@ export class DiscordSide {
 
   async start() {
     const guild = await this.client.guilds.fetch(this.guildId);
+    if (this.closed) throw new Error("saiu antes de entrar no Discord");
     const conn = joinVoiceChannel({
       channelId: this.channelId,
       guildId: this.guildId,
