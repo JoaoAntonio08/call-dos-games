@@ -12,10 +12,13 @@ import { fileURLToPath } from "node:url";
 import { CallBridge } from "./bridge.mjs";
 import { DiscordSide, discordClient } from "./discord.mjs";
 import { LiveKitSide, bridgeToken } from "./livekit.mjs";
+import { fetchState, plan, withTimeout } from "./plan.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const POLL_MS = 3000;
 const GRACE_MS = 20_000;
+const API_TIMEOUT_MS = 5000; // a API não respondeu nisso: tenta na próxima volta
+const START_TIMEOUT_MS = 45_000; // entrar nos dois lados (o Discord sozinho já tem 20 s)
 
 function loadEnv(file) {
   if (!fs.existsSync(file)) return;
@@ -42,11 +45,8 @@ const bridges = new Map();
 /** canal -> quando pode tentar de novo depois de uma falha */
 const retryAt = new Map();
 
-async function state() {
-  const r = await fetch(`${API}/internal/discord-voice`, { headers: { "x-bridge-secret": process.env.DISCORD_VOICE_SECRET } });
-  if (!r.ok) throw new Error(`API respondeu ${r.status}`);
-  return r.json();
-}
+/** call daqui -> com qual call (do mesmo servidor do Discord) ela está esperando; para avisar uma vez só */
+const waitingLogged = new Map();
 
 async function open(client, link) {
   const token = await bridgeToken({ key: process.env.LIVEKIT_API_KEY, secret: process.env.LIVEKIT_API_SECRET, room: link.room });
@@ -55,47 +55,48 @@ async function open(client, link) {
     makeDiscord: (cb) => new DiscordSide({ client, guildId: link.guild_id, channelId: link.discord_channel_id, ...cb }),
     makeApp: (cb) => new LiveKitSide({ url: process.env.LIVEKIT_URL, token, ...cb }),
     onClose: () => {
+      // só fecha a ponte desta entrada (a call pode já ter uma ponte nova para outro destino)
+      if (bridges.get(link.channel_id) !== entry) return;
       log(`call ${link.channel_id}: um dos lados caiu; tento de novo na próxima volta`);
-      void close(link.channel_id);
+      void close(link.channel_id, "um dos lados caiu");
     },
   });
   bridges.set(link.channel_id, entry);
   try {
-    await entry.bridge.start();
+    await withTimeout(entry.bridge.start(), START_TIMEOUT_MS, "entrar na call");
     log(`call ${link.channel_id}: ponte ligada (${link.app_people} aqui, ${link.discord_people} no Discord)`);
   } catch (e) {
     bridges.delete(link.channel_id);
+    await entry.bridge.stop();
     retryAt.set(link.channel_id, Date.now() + 30_000);
     log(`call ${link.channel_id}: não deu para ligar (${e.message}); tento de novo em 30 s`);
   }
 }
 
-async function close(channelId) {
+async function close(channelId, why = "") {
   const entry = bridges.get(channelId);
   if (!entry) return;
   bridges.delete(channelId);
   await entry.bridge.stop();
-  log(`call ${channelId}: ponte desligada`);
+  log(`call ${channelId}: ponte desligada${why ? ` (${why})` : ""}`);
 }
 
 async function loop(client) {
   for (;;) {
     try {
-      const s = await state();
-      const seen = new Set();
-      for (const link of s.links || []) {
-        seen.add(link.channel_id);
-        const entry = bridges.get(link.channel_id);
-        if (link.active) {
-          if (entry) entry.idleSince = null;
-          else if ((retryAt.get(link.channel_id) ?? 0) <= Date.now()) await open(client, link);
-        } else if (entry) {
-          entry.idleSince ??= Date.now();
-          if (Date.now() - entry.idleSince > GRACE_MS) await close(link.channel_id);
-        }
+      const s = await fetchState(API, process.env.DISCORD_VOICE_SECRET, { timeoutMs: API_TIMEOUT_MS });
+      const todo = plan(s.links || [], bridges, { now: Date.now(), retryAt, graceMs: GRACE_MS });
+      // fecha antes de abrir: libera o bot no servidor do Discord e para o áudio no destino velho
+      for (const { id, why } of todo.close) await close(id, why);
+      for (const link of todo.open) {
+        waitingLogged.delete(link.channel_id);
+        await open(client, link);
       }
-      // ligação desfeita: sai na hora
-      for (const id of [...bridges.keys()]) if (!seen.has(id)) await close(id);
+      for (const { link, holder } of todo.waiting) {
+        if (waitingLogged.get(link.channel_id) === holder) continue;
+        waitingLogged.set(link.channel_id, holder);
+        log(`call ${link.channel_id}: esperando, o bot já está na call ${holder} do mesmo servidor do Discord`);
+      }
     } catch (e) {
       log(`não consegui falar com a API (${e.message})`);
     }

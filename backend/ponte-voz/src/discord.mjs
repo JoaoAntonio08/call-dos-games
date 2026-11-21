@@ -56,8 +56,20 @@ export class DiscordSide {
     try {
       await entersState(conn, VoiceConnectionStatus.Ready, 20_000);
     } catch (e) {
-      conn.destroy();
+      try {
+        conn.destroy();
+      } catch {
+        /* já saiu */
+      }
       throw new Error(`não consegui entrar na call do Discord (${e.message})`);
+    }
+    if (this.closed) {
+      try {
+        conn.destroy();
+      } catch {
+        /* já saiu */
+      }
+      throw new Error("saiu enquanto entrava no Discord");
     }
     conn.on(VoiceConnectionStatus.Disconnected, async () => {
       // pode ser só troca de servidor de voz: espera reconectar; senão desiste
