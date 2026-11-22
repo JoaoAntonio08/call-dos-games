@@ -372,7 +372,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         </button>
       }
     >
-      {tab === "perfil" && <ProfileTab goAccount={() => setTab("conta")} />}
+      {tab === "perfil" && <ProfileTab />}
       {tab === "voz" && <VoiceTab />}
       {tab === "jogos" && (
         <div className="max-w-xl">
@@ -484,7 +484,7 @@ function useSaveMe() {
   };
 }
 
-function ProfileTab({ goAccount }: { goAccount: () => void }) {
+function ProfileTab() {
   const me = useStore((s) => s.me)!;
   const save = useSaveMe();
   const [f, setF] = useState({ display_name: me.display_name, pronouns: me.pronouns, bio: me.bio, custom_status: me.custom_status });
@@ -529,13 +529,8 @@ function ProfileTab({ goAccount }: { goAccount: () => void }) {
         <Section title="Nome">
           <input className="field" value={f.display_name} maxLength={32} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
         </Section>
-        <Section title="Usuário">
-          <div className="flex items-center gap-3">
-            <p className="text-[15px]">@{me.username}</p>
-            <button type="button" onClick={goAccount} className="text-[13.5px] font-semibold text-ember-2 hover:underline">
-              Trocar
-            </button>
-          </div>
+        <Section title="Usuário" hint="Letras minúsculas, números, ponto e _. É assim que a turma te adiciona. Dá para trocar quando quiser, desde que ninguém esteja usando.">
+          <UsernameField key={me.username} current={me.username} onSave={(username) => save({ username }).then((r) => r && toast(`Agora você é @${username}.`))} />
         </Section>
         <Section title="Pronomes">
           <input className="field" value={f.pronouns} maxLength={24} placeholder="ele/dele, ela/dela…" onChange={(e) => setF({ ...f, pronouns: e.target.value })} />
@@ -663,18 +658,18 @@ function ProfileTab({ goAccount }: { goAccount: () => void }) {
             )}
           </div>
         </Section>
-        <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 bg-cocoa-2 px-1 py-3">
-          {dirty && (
-            <>
-              <button type="button" onClick={() => setF({ display_name: me.display_name, pronouns: me.pronouns, bio: me.bio, custom_status: me.custom_status })} className="link-u px-3 text-[14px] text-oat/60">
-                Desfazer
-              </button>
-              <button type="button" onClick={() => void save(f).then((ok) => ok && toast("Perfil salvo."))} className="btn-ember h-10 px-5 text-[14px]">
-                Salvar alterações
-              </button>
-            </>
-          )}
-        </div>
+        {/* barra de salvar: só aparece quando tem mudança, flutuando no rodapé (antes ficava um retângulo vazio) */}
+        {dirty && (
+          <div className="glass-float enter-pop sticky bottom-3 mt-4 flex items-center justify-end gap-2 rounded-[12px] border border-oat/10 bg-cocoa-3 px-3 py-2.5 shadow-lg">
+            <span className="mr-auto text-[13.5px] text-oat/70">Você tem alterações sem salvar</span>
+            <button type="button" onClick={() => setF({ display_name: me.display_name, pronouns: me.pronouns, bio: me.bio, custom_status: me.custom_status })} className="link-u px-3 text-[14px] text-oat/60">
+              Desfazer
+            </button>
+            <button type="button" onClick={() => void save(f).then((ok) => ok && toast("Perfil salvo."))} className="btn-ember h-10 px-5 text-[14px]">
+              Salvar alterações
+            </button>
+          </div>
+        )}
       </div>
 
       {/* prévia ao vivo do cartão */}
@@ -778,9 +773,6 @@ function AccountTab() {
           <GoogleLinkControl />
         </Section>
       )}
-      <Section title="Usuário" hint="Letras minúsculas, números, ponto e _. É assim que a turma te adiciona. Dá para trocar quando quiser, desde que ninguém esteja usando.">
-        <UsernameField key={me.username} current={me.username} onSave={(username) => save({ username }).then((r) => r && toast(`Agora você é @${username}.`))} />
-      </Section>
       <Section title={me.has_password ? "Trocar senha" : "Criar uma senha"} hint={me.has_password ? "As outras sessões abertas saem quando você troca." : "Assim você também consegue entrar com e-mail e senha."}>
         <form
           className="space-y-2"
