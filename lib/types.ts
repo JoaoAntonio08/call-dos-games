@@ -24,6 +24,8 @@ export interface User {
   /** tema do cartão: [cima, baixo] ou [] */
   theme: string[];
   badges: string[];
+  /** enfeites de conquista que a pessoa escolheu mostrar */
+  flair?: Flair;
   /** mensagem de webhook (bot) */
   bot?: boolean;
   /** veio pela ponte com o Discord */
@@ -301,4 +303,32 @@ export interface Show {
   created_by: string | null;
   updated_by: string | null;
   updated_at: string;
+}
+
+/** Enfeites de conquista (backend/app/conquistas.py). Vazio = normal. */
+export interface Flair {
+  name?: string;
+  ring?: string;
+  banner?: string;
+  plate?: string;
+}
+
+export interface AchievementStep {
+  at: number;
+  reward: string;
+  label: string;
+  unlocked: boolean;
+}
+export interface AchievementTrack {
+  id: string;
+  name: string;
+  unit: string;
+  value: number;
+  max: number;
+  steps: AchievementStep[];
+}
+export interface Achievements {
+  tracks: AchievementTrack[];
+  unlocked: string[];
+  flair: Flair;
 }

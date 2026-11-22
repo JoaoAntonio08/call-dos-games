@@ -187,6 +187,9 @@ async def create_server(body: ServerIn, me: Auth = CurrentUser) -> dict:
             )
     out = await server_out(server_id, me.id)
     await hub.send([me.id], "server_create", out)
+    from ..conquistas import server_created
+
+    await server_created(me.id)  # placa Fundador
     return out
 
 

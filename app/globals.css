@@ -463,43 +463,20 @@ input[type="range"].range::-moz-range-thumb {
   background: var(--color-cocoa-2);
 }
 
-html[data-look="glass"] body {
-  background:
-    radial-gradient(60vmax 45vmax at 12% 8%, color-mix(in srgb, var(--glass-tint) 20%, transparent), transparent 70%),
-    radial-gradient(55vmax 40vmax at 92% 88%, color-mix(in srgb, var(--glass-tint) 14%, #eb459e 6%), transparent 70%),
-    var(--color-cocoa-1);
-  background-attachment: fixed;
-}
-
-/* superfícies grandes: só um pouco translúcidas, sem desfoque (leve para o PC e para os olhos) */
-html[data-look="glass"] .bg-cocoa-1 {
-  background-color: color-mix(in srgb, #18191c 80%, transparent);
-}
-html[data-look="glass"] .bg-cocoa-2 {
-  background-color: color-mix(in srgb, #1f2023 82%, transparent);
-}
-html[data-look="glass"] .bg-cocoa-3 {
-  background-color: color-mix(in srgb, #27282c 78%, transparent);
-}
-
-/* o que flutua por cima (janelas, painéis, avisos, cartões): vidro de verdade */
+/* O fundo e os painéis grandes ficam sólidos: o vidro é só para o que flutua por cima
+   (janelas, menus, avisos, cartões), com um toque da cor escolhida. */
 html[data-look="glass"] .glass,
 html[data-look="glass"] .glass-float {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--glass-tint) 13%, rgb(39 40 44 / 0.62)), rgb(24 25 28 / 0.7)) !important;
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  backdrop-filter: blur(22px) saturate(160%);
-  border: 1px solid color-mix(in srgb, var(--glass-tint) 24%, rgb(255 255 255 / 0.08));
+  background: color-mix(in srgb, var(--glass-tint) 7%, rgb(32 33 37 / 0.86)) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--glass-tint) 16%, rgb(255 255 255 / 0.07));
   box-shadow:
-    inset 1px 1px 0 rgb(255 255 255 / 0.13),
-    inset -1px -1px 0 rgb(255 255 255 / 0.04),
-    0 18px 50px -16px rgb(0 0 0 / 0.6),
-    0 0 40px -18px color-mix(in srgb, var(--glass-tint) 60%, transparent);
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 16px 40px -16px rgb(0 0 0 / 0.6);
 }
 html[data-look="glass"] .glass-soft {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--glass-tint) 8%, rgb(31 32 35 / 0.7)), rgb(31 32 35 / 0.55));
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 0.08);
+  background: color-mix(in srgb, var(--glass-tint) 5%, var(--color-cocoa-2));
 }
 /* aviso (toast) no estilizado: vidro escuro com texto claro */
 html[data-look="glass"] .toast-glass {
@@ -633,4 +610,124 @@ html[data-look="glass"] .toast-glass {
 }
 @keyframes intro-out {
   to { opacity: 0; visibility: hidden; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Enfeites de conquista (lib/badges.ts: nameStyle, ringClass...)       */
+/* ------------------------------------------------------------------ */
+
+.fx-name-gradient {
+  background: linear-gradient(90deg, var(--fx-a, #5865f2), color-mix(in srgb, var(--fx-a, #5865f2) 35%, #fff) 60%, var(--fx-a, #5865f2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.fx-name-rgb {
+  background: linear-gradient(90deg, #ff5f6d, #ffc371, #5ef38c, #4fc3f7, #b388ff, #ff5f6d);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: fx-slide 3s linear infinite;
+}
+@keyframes fx-slide {
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.fx-ring-pulse,
+.fx-ring-live {
+  position: relative;
+}
+.fx-ring-pulse::after,
+.fx-ring-live::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 9999px;
+  border: 2px solid #23a55a;
+  animation: fx-ring 1.8s ease-out infinite;
+  pointer-events: none;
+}
+.fx-ring-live::after {
+  border-color: #f23f43;
+  animation-duration: 1.2s;
+}
+@keyframes fx-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.22);
+    opacity: 0;
+  }
+}
+
+.fx-banner-shine {
+  overflow: hidden;
+}
+.fx-banner-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.22) 50%, transparent 65%);
+  transform: translateX(-100%);
+  animation: fx-shine 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes fx-shine {
+  60%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.plate {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  border-radius: 10px;
+  padding: 9px 12px;
+  transform: perspective(500px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 0.15s ease-out;
+}
+.plate-prata {
+  background: #c9ccd3;
+  color: #33363d;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.5);
+}
+.plate-ouro {
+  background: #e3c77f;
+  color: #4f3b10;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.45);
+}
+.plate-holo {
+  background: #dcd3f2;
+  color: #2f2550;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.55);
+}
+.plate-shine {
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(from var(--hue, 0deg), #ff5f6d66, #ffc37166, #5ef38c66, #4fc3f766, #b388ff66, #ff5f6d66);
+  mix-blend-mode: multiply;
+  animation: fx-holo 8s linear infinite;
+}
+@keyframes fx-holo {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-name-rgb,
+  .fx-ring-pulse::after,
+  .fx-ring-live::after,
+  .fx-banner-shine::after,
+  .plate-shine {
+    animation: none;
+  }
 }

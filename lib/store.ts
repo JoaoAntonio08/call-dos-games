@@ -573,6 +573,7 @@ function handleEvent(t: string, d: any) {
     case "music_added":
     case "share_block":
     case "share_unblock":
+    case "conquista":
       window.dispatchEvent(new CustomEvent(`cdg:${t.replace("_", "-")}`, { detail: d }));
       break;
   }

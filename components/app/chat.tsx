@@ -1,6 +1,6 @@
 "use client";
 
-import { nameColorOf } from "@/lib/badges";
+import { nameStyle } from "@/lib/badges";
 import Link from "next/link";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileText, Hash, MessageSquare, Pencil, Phone, PhoneOff, Plus, Reply, SmilePlus, Sticker as StickerIcon, Trash2, Users, X } from "lucide-react";
@@ -411,8 +411,8 @@ const MessageItem = memo(function MessageItem({
               <button
                 type="button"
                 onClick={(e) => author && !author.bot && openProfile(author.id, e.currentTarget, serverId)}
-                className="truncate text-[15px] font-semibold hover:underline"
-                style={{ color: nameColorOf(author) }}
+                className={`truncate text-[15px] font-semibold hover:underline ${nameStyle(author).className}`}
+                style={nameStyle(author).style}
               >
                 {name}
               </button>
