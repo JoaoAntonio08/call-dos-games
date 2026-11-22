@@ -202,3 +202,32 @@ def test_reset_when_call_empties():
     radio.picked[CALL] = "x"
     radio.reset(CALL)
     assert CALL not in radio.history and CALL not in radio.off and CALL not in radio.picked
+
+
+@pytest.mark.asyncio
+async def test_song_ending_asks_the_radio_again(monkeypatch):
+    """A escolha do começo falhou (ou tiraram a próxima da fila): quando a música para, o rádio tenta de novo."""
+    from app.routes import musica
+
+    asked: list[int] = []
+    monkeypatch.setattr(musica.radio, "schedule_fill", lambda cid: asked.append(cid))
+    monkeypatch.setattr(musica.hub, "user_voice", {5: CALL})
+    monkeypatch.setattr(musica.hub, "music", {CALL: {"video_id": "aaaaaaaaaa1", "playing": True, "owner_id": "5"}})
+
+    async def set_music(cid, m):
+        musica.hub.music[cid] = m
+
+    monkeypatch.setattr(musica.hub, "set_music", set_music)
+    monkeypatch.setitem(musica._titles, "aaaaaaaaaa1", ("Quer Voar", "Matuê"))
+
+    async def fetch_user(uid):
+        return {"display_name": "Ana"}
+
+    monkeypatch.setattr(musica, "fetch_user", fetch_user)
+    me = SimpleNamespace(id=5)
+    body = musica.NowPlayingIn(channel_id=str(CALL), video_id="aaaaaaaaaa1", playing=False)
+    await musica.now_playing(body, me)
+    assert asked == [CALL], "parou no fim: rádio tenta escolher a próxima"
+    body = musica.NowPlayingIn(channel_id=str(CALL), video_id="aaaaaaaaaa1", playing=True)
+    await musica.now_playing(body, me)
+    assert asked == [CALL], "voltar a tocar a mesma não pesquisa de novo"

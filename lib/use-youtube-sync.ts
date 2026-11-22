@@ -313,18 +313,20 @@ export function useYouTubeSync(room: Room | null, flash: (m: string) => void, on
     [applyToPlayer],
   );
 
-  /** Fim do vídeo: o líder pausa no final para todo mundo ficar igual. */
+  /** Fim do vídeo: o líder pausa no final para todo mundo ficar igual.
+   *  O líder é quem deu o último comando; se essa pessoa saiu da call, quem vem primeiro na lista assume
+   *  (antes ninguém passava para a próxima e a fila ficava parada). */
   const onPlayerState = useCallback(
     (ps: number) => {
       const s = stateRef.current;
-      if (!s || !me) return;
-      if (ps === YT_STATE.ENDED && s.playing && s.by === me.identity) {
+      if (!s || !me || !room) return;
+      if (ps === YT_STATE.ENDED && s.playing && leaderOf(room, s) === me.identity) {
         // tem fila? o próximo vídeo entra no lugar
         if (onEndedRef.current?.()) return;
         commit({ playing: false, time: playerRef.current?.getDuration() ?? s.time });
       }
     },
-    [commit, me],
+    [commit, me, room],
   );
 
   const votes = state && skipVotes.video === state.videoId ? skipVotes.count : 0;

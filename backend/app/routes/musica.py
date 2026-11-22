@@ -122,6 +122,9 @@ async def now_playing(body: NowPlayingIn, me: Auth = CurrentUser) -> dict:
     if new_song:
         # rádio da call: lembra o que tocou e, se a fila acabou, já escolhe a próxima na mesma vibe
         radio.remember(cid, vid, title, author)
+    if new_song or not body.playing:
+        # também quando para (a música acabou): se a escolha do começo falhou ou alguém tirou a próxima da fila,
+        # o rádio tenta de novo, e o app começa a nova sozinho
         radio.schedule_fill(cid)
     return {"ok": True}
 
