@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -61,6 +62,8 @@ class MeIn(BaseModel):
     name_color: str | None = None
     theme: list[str] | None = None
     badges: list[str] | None = None
+    # enfeites de conquista: {"name": "rgb", "plate": "founder", ...}; vazio tira
+    flair: dict[str, str] | None = None
 
 
 # insígnias que dá para escolher (o site tem a mesma lista em lib/badges.ts)
@@ -120,6 +123,19 @@ async def update_me(body: MeIn, me: Auth = CurrentUser) -> dict:
         if len(picked) > MAX_BADGES or any(b not in BADGES for b in picked):
             raise err(400, f"Escolha até {MAX_BADGES} insígnias da lista.")
         sets["badges"] = picked
+    if body.flair is not None:
+        from ..conquistas import SLOTS, clean_flair, unlocked_from, values_of
+
+        unlocked = unlocked_from(await values_of(me.id))
+        wanted = {k: v for k, v in body.flair.items() if k in SLOTS and v}
+        kept = clean_flair(wanted, unlocked)
+        if kept != wanted:
+            raise err(400, "Esse enfeite ainda não foi liberado.")
+        current = await pool().fetchval("SELECT flair FROM users WHERE id = $1", me.id)
+        from ..conquistas import parse_flair
+
+        merged = {**parse_flair(current), **{k: v for k, v in body.flair.items() if k in SLOTS}}
+        sets["flair"] = json.dumps(clean_flair(merged, unlocked))
     if sets:
         cols = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(sets))
         try:

@@ -6,7 +6,7 @@ import { ContextMenuHost } from "./context-menu";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { useRoute, useUI } from "@/lib/ui";
+import { toast, useRoute, useUI } from "@/lib/ui";
 import { accentVars } from "@/lib/theme";
 import { tintColor, useLook } from "@/lib/aparencia";
 import { ServerRail } from "./rail";
@@ -36,6 +36,15 @@ export function Shell() {
   const focusOn = useUI((s) => s.focus);
   const showMembers = useUI((s) => s.showMembers);
   const toastMsg = useUI((s) => s.toast);
+  // conquista liberada (o servidor avisa quando a pessoa passa de uma etapa)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ label: string }>).detail;
+      toast(`🏆 Conquista liberada: ${d.label}. Escolha o que mostrar em Configurações → Perfil.`);
+    };
+    window.addEventListener("cdg:conquista", on);
+    return () => window.removeEventListener("cdg:conquista", on);
+  }, []);
 
   const server = route.kind === "server" ? servers[route.serverId] : undefined;
   const channel = server && route.kind === "server" ? server.channels.find((c) => c.id === route.channelId) : undefined;

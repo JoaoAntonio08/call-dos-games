@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import threading
@@ -217,7 +218,7 @@ def media(file_id: int | None, animated: bool | None) -> dict[str, Any] | None:
 
 USER_COLUMNS = """
     u.id, u.username, u.display_name, u.bio, u.accent, u.status, u.custom_status, u.pronouns, u.created_at,
-    u.name_color, u.theme, u.badges,
+    u.name_color, u.theme, u.badges, u.flair,
     u.avatar_id, av.animated AS avatar_animated,
     u.banner_id, bn.animated AS banner_animated,
     u.join_sound_id
@@ -246,8 +247,23 @@ def user_out(r: asyncpg.Record | dict, presence: str | None = None) -> dict[str,
         "name_color": r["name_color"],
         "theme": list(r["theme"] or []),
         "badges": list(r["badges"] or []),
+        "flair": _flair(r),
         "created_at": r["created_at"].isoformat(),
     }
+
+
+def _flair(r: Any) -> dict[str, str]:
+    """Enfeites de conquista que a pessoa escolheu mostrar (vem como texto JSON do banco)."""
+    try:
+        raw = r["flair"]
+    except (KeyError, IndexError):
+        return {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    return {k: str(v) for k, v in raw.items() if v} if isinstance(raw, dict) else {}
 
 
 async def fetch_user(user_id: int) -> asyncpg.Record | None:

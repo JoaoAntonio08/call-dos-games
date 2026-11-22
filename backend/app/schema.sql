@@ -402,3 +402,12 @@ CREATE TABLE IF NOT EXISTS event_attendance (
 
 -- ponte com o Discord: cartões (embeds) das mensagens de lá, como o do starboard da Loritta
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS embeds JSONB NOT NULL DEFAULT '[]';
+
+-- conquistas: horas contadas pelo servidor e o enfeite que cada pessoa escolheu mostrar
+CREATE TABLE IF NOT EXISTS user_stats (
+    user_id        BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    call_seconds   BIGINT NOT NULL DEFAULT 0,
+    share_seconds  BIGINT NOT NULL DEFAULT 0,
+    watch_seconds  BIGINT NOT NULL DEFAULT 0
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS flair JSONB NOT NULL DEFAULT '{}';

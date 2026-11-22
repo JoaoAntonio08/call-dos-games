@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Hash, ImagePlus, LogOut, Play, Trash2, Upload, Volume2 } from "lucide-react";
+import { Copy, Hash, ImagePlus, Lock, LogOut, Play, Trash2, Upload, Volume2 } from "lucide-react";
 import { api, errorText, upload } from "@/lib/api";
 import { logout, useStore } from "@/lib/store";
 import { closeModal, toast, useUI } from "@/lib/ui";
 import { useVoice, type VoicePrefs } from "@/lib/voice";
-import type { Me, Server } from "@/lib/types";
-import { BADGES, MAX_BADGES, nameColorOf, themeBgOf } from "@/lib/badges";
-import { BadgeRow } from "./badges";
+import type { AchievementTrack, Achievements, Flair, Me, Server } from "@/lib/types";
+import { BADGES, bannerClass, FLAIR_SLOTS, MAX_BADGES, nameStyle, ringClass, themeBgOf } from "@/lib/badges";
+import { BadgeRow, Plate } from "./badges";
 import { AnimImg, Avatar, CloseButton, FormError, Modal, Section, ServerIcon, Toggle, Tip } from "./bits";
 import { keyName } from "./user-bar";
 import { BotsTab, DiscordTab, SteamSettings } from "./integracoes";
@@ -18,7 +18,7 @@ import { ChannelAccess, MemberRoles, RolesTab } from "./cargos";
 import { BotBuilder } from "./bot-builder";
 import { NotificationsTab } from "./avisos";
 import { PlatformTab, UsageTab } from "./uso";
-import { tintColor, useLook, type LookStyle } from "@/lib/aparencia";
+import { tintColor, useLook, type LookStyle, type LookTint } from "@/lib/aparencia";
 import { LogoMark } from "./intro";
 import { Room } from "livekit-client";
 
@@ -355,6 +355,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         ["jogos", "Jogos"],
         ["avisos", "Notificações"],
         ["aparencia", "Aparência"],
+        ["conquistas", "Conquistas"],
         ["conta", "Conta"],
         ...(hasDesktopApp() ? ([["app", "App de Windows"]] as [string, string][]) : []),
         ...(platform ? ([["plataforma", "Plataforma"]] as [string, string][]) : []),
@@ -384,6 +385,7 @@ function UserSettings({ tab: initial }: { tab?: string }) {
       {tab === "conta" && <AccountTab />}
       {tab === "avisos" && <NotificationsTab />}
       {tab === "aparencia" && <LookTab />}
+      {tab === "conquistas" && <AchievementsTab />}
       {tab === "app" && (
         <div className="max-w-xl">
           <H>App de Windows</H>
@@ -395,79 +397,188 @@ function UserSettings({ tab: initial }: { tab?: string }) {
   );
 }
 
-/** Estilizado (vidro tingido + entrada animada) ou Normal (sólido), e a cor do vidro. Fica neste aparelho. */
+/** Tema (vidro ou sólido), cor do vidro e animação de abertura. Fica neste aparelho. */
 function LookTab() {
   const look = useLook();
   const me = useStore((s) => s.me);
   // "do servidor": a cor que o app já aplicou (depende do servidor aberto)
   const color = look.tint === "servidor" ? "var(--glass-tint)" : tintColor(look.tint, undefined, me?.accent);
-  const styles: [LookStyle, string, string][] = [
-    ["estilizado", "Estilizado", "Painéis de vidro na cor escolhida, fundo com brilho suave e entrada animada."],
-    ["normal", "Normal", "O visual sólido de sempre, sem transparência. Mais leve em PC fraco."],
+  const themes: [LookStyle, string][] = [
+    ["estilizado", "Vidro"],
+    ["normal", "Sólido"],
   ];
-  const tints: [string, string][] = [
-    ["servidor", "Do servidor aberto"],
-    ["perfil", "Da minha cor de perfil"],
+  const tints: [LookTint, string][] = [
+    ["servidor", "Do servidor"],
+    ["perfil", "Do meu perfil"],
   ];
+  const pill = (on: boolean) => `press h-8 rounded-[6px] px-3 text-[13.5px] ${on ? "bg-cocoa-5 text-oat" : "bg-cocoa-3 text-oat/65 hover:text-oat"}`;
   return (
     <div className="max-w-xl">
       <H>Aparência</H>
-      <Section title="Estilo" hint="Vale só neste aparelho.">
-        <div className="grid gap-2 sm:grid-cols-2">
-          {styles.map(([id, name, text]) => (
+      <Section title="Tema" hint="Vale só neste aparelho.">
+        <div className="flex flex-wrap gap-3">
+          {themes.map(([id, name]) => (
             <button
               key={id}
               type="button"
               aria-pressed={look.style === id}
               onClick={() => look.set({ style: id })}
-              className={`press rounded-[12px] border p-3 text-left ${look.style === id ? "border-oat/40 bg-cocoa-4" : "border-oat/10 hover:bg-cocoa-3"}`}
+              className={`press w-[150px] overflow-hidden rounded-[8px] border-2 bg-cocoa-3 text-left ${look.style === id ? "border-ember" : "border-transparent hover:border-oat/15"}`}
             >
-              <span
-                className="mb-2 block h-14 rounded-[9px]"
-                style={
-                  id === "estilizado"
-                    ? {
-                        background: `radial-gradient(120% 90% at 20% 10%, color-mix(in srgb, ${color} 40%, transparent), transparent 60%), linear-gradient(135deg, color-mix(in srgb, ${color} 20%, transparent), #1e1f22)`,
-                        boxShadow: "inset 0 1px 0 rgba(255,255,255,.18)",
-                      }
-                    : { background: "#2b2d31" }
-                }
-              />
-              <span className="block text-[14.5px] font-medium">{name}</span>
-              <span className="text-[12.5px] text-oat/50">{text}</span>
+              <span className="grid h-16 grid-cols-[18px_34px_1fr] gap-[3px] bg-cocoa-1 p-1.5" aria-hidden>
+                {[22, 14, 9].map((pct, i) => (
+                  <span
+                    key={i}
+                    className="rounded-[3px]"
+                    style={{ background: id === "estilizado" ? `color-mix(in srgb, ${color} ${pct}%, #2b2d31)` : i === 2 ? "#313338" : "#2b2d31" }}
+                  />
+                ))}
+              </span>
+              <span className="block px-2.5 py-1.5 text-[13.5px]">{name}</span>
             </button>
           ))}
         </div>
       </Section>
       <Section title="Cor do vidro">
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-3 flex flex-wrap gap-1.5">
           {tints.map(([id, name]) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={look.tint === id}
-              onClick={() => look.set({ tint: id as "servidor" | "perfil" })}
-              className={`press h-9 rounded-[9px] px-3 text-[13.5px] ${look.tint === id ? "bg-cocoa-4 text-oat" : "bg-cocoa-3 text-oat/70 hover:text-oat"}`}
-            >
+            <button key={id} type="button" aria-pressed={look.tint === id} onClick={() => look.set({ tint: id })} className={pill(look.tint === id)}>
               {name}
             </button>
           ))}
         </div>
         <Swatches value={look.tint.startsWith("#") ? look.tint : ""} colors={ACCENTS} onPick={(c) => look.set({ tint: c as `#${string}` })} />
       </Section>
-      <Section title="Entrada">
+      <Section title="Abertura">
         <label className="flex items-center justify-between gap-4 py-1">
           <span>
-            <span className="block text-[14.5px] font-medium">Animação ao abrir</span>
-            <span className="text-[12.5px] text-oat/50">Uma vez por abertura. Clique ou aperte uma tecla para pular.</span>
+            <span className="block text-[14.5px]">Animação ao abrir o app</span>
+            <span className="text-[12.5px] text-oat/50">Clique ou aperte uma tecla para pular</span>
           </span>
-          <Toggle checked={look.intro} onChange={(x) => look.set({ intro: x })} label="Animação ao abrir" />
+          <Toggle checked={look.intro} onChange={(x) => look.set({ intro: x })} label="Animação ao abrir o app" />
         </label>
-        <button type="button" onClick={() => look.playIntro()} className="press mt-3 flex h-9 items-center gap-2 rounded-[9px] bg-cocoa-3 px-3 text-[13.5px] hover:bg-cocoa-4">
-          <LogoMark tint={color} className="size-5" /> Ver a animação
-        </button>
+        <div className="mt-2 flex items-center justify-between gap-4 py-1">
+          <span className="text-[14.5px]">Rever a animação</span>
+          <button type="button" onClick={() => look.playIntro()} className={pill(false)}>
+            <LogoMark tint={color} className="mr-1.5 inline size-4 align-[-3px]" />
+            Tocar
+          </button>
+        </div>
       </Section>
     </div>
+  );
+}
+
+/** O que a pessoa já ganhou (o servidor conta as horas). */
+function useAchievements() {
+  const [data, setData] = useState<Achievements | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    api<Achievements>("/me/conquistas")
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(errorText(e)));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return { data, error };
+}
+
+const fmtAmount = (n: number, unit: string) => `${Number.isInteger(n) ? n : n.toFixed(1).replace(".", ",")}${unit ? ` ${unit}` : ""}`;
+
+function AchievementsTab() {
+  const { data, error } = useAchievements();
+  return (
+    <div className="max-w-xl">
+      <H>Conquistas</H>
+      <p className="-mt-3 mb-5 text-[14px] text-oat/60">
+        As horas contam sozinhas quando você está numa call com mais alguém. Cada etapa libera um enfeite para o perfil; escolha o que mostrar em Perfil → Enfeites de conquista.
+      </p>
+      <FormError>{error}</FormError>
+      {!data && !error && <p className="text-[14px] text-oat/50">Carregando…</p>}
+      {data?.tracks.map((t) => <TrackCard key={t.id} track={t} />)}
+    </div>
+  );
+}
+
+function TrackCard({ track: t }: { track: AchievementTrack }) {
+  const pct = Math.min(100, (t.value / t.max) * 100);
+  return (
+    <section className="mb-3 rounded-[8px] bg-cocoa-3 px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-[15px] font-semibold">{t.name}</h3>
+        <span className="text-[12.5px] text-oat/50">
+          {fmtAmount(t.value, t.unit)} de {fmtAmount(t.max, t.unit)}
+        </span>
+      </div>
+      <div className="relative mx-1.5 mt-3 h-1.5 rounded-full bg-cocoa-5" role="progressbar" aria-valuemin={0} aria-valuemax={t.max} aria-valuenow={t.value} aria-label={t.name}>
+        <div className="absolute inset-y-0 left-0 rounded-full bg-ember" style={{ width: `${pct}%` }} />
+        {t.steps.map((st) => (
+          <span
+            key={st.reward}
+            className={`absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-cocoa-3 ${st.unlocked ? "bg-ember" : "bg-cocoa-5"}`}
+            style={{ left: `${(st.at / t.max) * 100}%` }}
+          />
+        ))}
+      </div>
+      <ul className="mt-4 space-y-1.5">
+        {t.steps.map((st) => (
+          <li key={st.reward} className="flex items-center justify-between gap-3 text-[13.5px]">
+            <span className={st.unlocked ? "text-oat" : "text-oat/55"}>{st.label}</span>
+            <span className={`shrink-0 text-[12.5px] ${st.unlocked ? "text-[#23a55a]" : "text-oat/40"}`}>{st.unlocked ? "Liberado" : fmtAmount(st.at, t.unit)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Perfil → o que mostrar: "Normal" ou um enfeite já ganho. Os que faltam aparecem com cadeado e quanto falta. */
+function FlairSection() {
+  const me = useStore((s) => s.me)!;
+  const { data } = useAchievements();
+  const save = useSaveMe();
+  const unlocked = new Set(data?.unlocked ?? []);
+  const flair: Flair = me.flair ?? {};
+  const needs = (reward: string) => {
+    for (const t of data?.tracks ?? []) for (const st of t.steps) if (st.reward === reward) return `${fmtAmount(st.at, t.unit)} · ${t.name.toLowerCase()}`;
+    return "";
+  };
+  const chip = (on: boolean) => `press inline-flex h-8 items-center gap-1.5 rounded-[6px] px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-45 ${on ? "bg-ember text-white" : "bg-cocoa-0 text-oat/70 hover:text-oat"}`;
+  return (
+    <Section title="Enfeites de conquista" hint="Ganhe mais em Configurações → Conquistas.">
+      {FLAIR_SLOTS.map(({ slot, title, options }) => (
+        <div key={slot} className="mb-3 last:mb-0">
+          <p className="mb-1.5 text-[13px] text-oat/60">{title}</p>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" aria-pressed={!flair[slot]} onClick={() => void save({ flair: { [slot]: "" } })} className={chip(!flair[slot])}>
+              Normal
+            </button>
+            {options.map((o) => {
+              const reward = `${slot}:${o.value}`;
+              const ok = unlocked.has(reward);
+              const on = flair[slot] === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  aria-pressed={on}
+                  disabled={!ok}
+                  title={ok ? undefined : `Libera com ${needs(reward)}`}
+                  onClick={() => void save({ flair: { [slot]: o.value } })}
+                  className={chip(on)}
+                >
+                  {!ok && <Lock className="size-3.5" aria-hidden />}
+                  {o.label}
+                  {!ok && <span className="sr-only"> (libera com {needs(reward)})</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </Section>
   );
 }
 
@@ -615,10 +726,11 @@ function ProfileTab() {
             </button>
             <Swatches value={me.name_color} colors={["#ff7aa2", "#ff8f5a", "#ffd166", "#7ee081", "#5ee0d6", "#6ec1ff", "#a99bff", "#f2f3f5"]} onPick={(c) => void save({ name_color: c })} />
           </div>
-          <p className="mt-2 text-[14px] font-semibold" style={{ color: nameColorOf(me) }}>
+          <p className={`mt-2 text-[14px] font-semibold ${nameStyle(me).className}`} style={nameStyle(me).style}>
             {f.display_name || me.display_name} <span className="font-normal text-oat/40">fica assim no chat</span>
           </p>
         </Section>
+        <FlairSection />
         <Section title="Insígnias" hint={`Escolha até ${MAX_BADGES}. Elas aparecem no seu perfil.`}>
           <div className="flex flex-wrap gap-1.5">
             {BADGES.map((b) => {
@@ -676,16 +788,17 @@ function ProfileTab() {
       <div className="lg:sticky lg:top-0 lg:self-start">
         <p className="label mb-3 text-oat/40">Prévia</p>
         <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: me.theme[0] ?? "var(--color-cocoa-0)", background: themeBgOf(me) }}>
-          <div className="h-[100px]" style={{ background: themeBgOf(me) ? "transparent" : `color-mix(in srgb, ${me.accent} 65%, #18191c)` }}>
+          <div className={`relative h-[100px] ${bannerClass(me)}`} style={{ background: themeBgOf(me) ? "transparent" : `color-mix(in srgb, ${me.accent} 65%, #18191c)` }}>
             {me.banner && <AnimImg media={me.banner} alt="" className="size-full object-cover" play />}
           </div>
           <div className="px-4 pb-4">
-            <span className="-mt-10 inline-block rounded-full p-1.5" style={{ background: me.theme[0] ?? "var(--color-cocoa-0)" }}>
+            <span className={`-mt-10 inline-block rounded-full p-1.5 ${ringClass(me)}`} style={{ background: me.theme[0] ?? "var(--color-cocoa-0)" }}>
               <Avatar name={f.display_name || me.display_name} avatar={me.avatar} accent={me.accent} size={72} status={me.status} play />
             </span>
             <BadgeRow user={me} className="mt-1" />
+            <Plate id={me.flair?.plate} className="mt-2" />
             <div className={`mt-2 rounded-[14px] p-3 ${me.theme.length ? "bg-black/40" : "bg-cocoa-2"}`}>
-              <p className="font-display text-[22px] font-semibold leading-tight" style={{ color: me.name_color || undefined }}>
+              <p className={`font-display text-[22px] font-semibold leading-tight ${nameStyle(me).className}`} style={{ ...nameStyle(me).style, color: me.name_color || undefined }}>
                 {f.display_name || " "}
               </p>
               <p className="text-[13px] text-oat/55">
@@ -757,7 +870,6 @@ function UsernameField({ current, onSave }: { current: string; onSave: (u: strin
 
 function AccountTab() {
   const me = useStore((s) => s.me)!;
-  const save = useSaveMe();
   const [pw, setPw] = useState({ current: "", new: "" });
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");

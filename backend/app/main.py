@@ -37,13 +37,14 @@ from .routes.jogos import free_games_loop
 from .routes.discord import router as discord_router, discord_loop
 from .routes.noites import router as noites_router, noites_loop
 from .routes.templates import router as templates_router
+from .conquistas import router as conquistas_router, stats_loop
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await connect_db()
     loop = asyncio.create_task(steam_loop()) if settings.steam_key else None
-    chores = [asyncio.create_task(expire_loop()), asyncio.create_task(reminder_loop()), asyncio.create_task(share_expire_loop()), asyncio.create_task(free_games_loop()), asyncio.create_task(discord_loop()), asyncio.create_task(noites_loop())]
+    chores = [asyncio.create_task(expire_loop()), asyncio.create_task(reminder_loop()), asyncio.create_task(share_expire_loop()), asyncio.create_task(free_games_loop()), asyncio.create_task(discord_loop()), asyncio.create_task(noites_loop()), asyncio.create_task(stats_loop())]
     yield
     if loop:
         loop.cancel()
@@ -126,5 +127,5 @@ async def health() -> dict:
     return {"ok": True}
 
 
-for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router, bots_router, uso_router, musica_router, discord_router, noites_router, templates_router):
+for r in (auth_router, users_router, servers_router, messages_router, extras_router, session_router, files_router, realtime_router, voz_router, extras2_router, comandos_router, bots_router, uso_router, musica_router, discord_router, noites_router, templates_router, conquistas_router):
     app.include_router(r)

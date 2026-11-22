@@ -1,7 +1,7 @@
 "use client";
 
-import { themeBgOf } from "@/lib/badges";
-import { BadgeRow } from "./badges";
+import { bannerClass, nameStyle, ringClass, themeBgOf } from "@/lib/badges";
+import { BadgeRow, Plate } from "./badges";
 import { SteamCard } from "./integracoes";
 import { useEffect, useState } from "react";
 import { MessageCircle, Pencil, UserCheck, UserPlus } from "lucide-react";
@@ -60,12 +60,12 @@ export function ProfilePopover() {
     <Popover anchor={profile.rect} onClose={closeProfile} side="right" className="w-[320px]">
       <div className="overflow-hidden rounded-[18px] bg-cocoa-0" style={{ ["--dot-ring" as string]: themeBg ? (u.theme[0] ?? "var(--color-cocoa-0)") : "var(--color-cocoa-0)", background: themeBg }}>
         {/* banner: imagem ou faixa na cor do perfil */}
-        <div className="relative h-[112px]" style={{ background: themeBg ? "transparent" : `color-mix(in srgb, ${accent} 65%, #18191c)` }}>
+        <div className={`relative h-[112px] ${bannerClass(u)}`} style={{ background: themeBg ? "transparent" : `color-mix(in srgb, ${accent} 65%, #18191c)` }}>
           {u.banner && <AnimImg media={u.banner} alt="" className="size-full object-cover" play />}
         </div>
         <div className="relative px-4 pb-4">
           <div className="-mt-11 flex items-end justify-between">
-            <span className="rounded-full p-1.5" style={{ background: themeBg ? u.theme[0] : "var(--color-cocoa-0)" }}>
+            <span className={`rounded-full p-1.5 ${ringClass(u)}`} style={{ background: themeBg ? u.theme[0] : "var(--color-cocoa-0)" }}>
               <Avatar name={u.display_name} avatar={u.avatar} accent={accent} size={80} status={status} play />
             </span>
             {member && member.role !== "member" && (
@@ -73,8 +73,9 @@ export function ProfilePopover() {
             )}
           </div>
           <BadgeRow user={u} className="mt-2" />
+          <Plate id={u.flair?.plate} className="mt-2" />
           <div className={`mt-2 rounded-[14px] p-3.5 ${themeBg ? "bg-black/40 backdrop-blur-sm" : "bg-cocoa-2"}`}>
-            <p className="font-display text-[24px] font-semibold leading-tight" style={{ color: u.name_color || undefined }}>
+            <p className={`font-display text-[24px] font-semibold leading-tight ${nameStyle(u).className}`} style={{ ...nameStyle(u).style, color: u.name_color || undefined }}>
               {member?.nickname || u.display_name}
             </p>
             <p className="text-[13.5px] text-oat/55">

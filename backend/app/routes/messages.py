@@ -27,7 +27,7 @@ SELECT_MESSAGES = """
            u.accent AS u_accent, u.status AS u_status, u.custom_status AS u_custom_status, u.pronouns AS u_pronouns,
            u.created_at AS u_created_at, u.avatar_id AS u_avatar_id, av.animated AS u_avatar_animated,
            u.banner_id AS u_banner_id, bn.animated AS u_banner_animated, u.join_sound_id AS u_join_sound_id,
-           u.name_color AS u_name_color, u.theme AS u_theme, u.badges AS u_badges
+           u.name_color AS u_name_color, u.theme AS u_theme, u.badges AS u_badges, u.flair AS u_flair
     FROM messages m
     LEFT JOIN users u ON u.id = m.author_id
     LEFT JOIN files av ON av.id = u.avatar_id
@@ -110,7 +110,7 @@ def bot_author(webhook_id: int, name: str, created_at: Any, *, avatar: str = "",
     out = {
         "id": f"dc{ext}" if ext else sid(webhook_id), "username": "bot", "display_name": name or "Bot", "bio": "", "accent": "#5865f2",
         "pronouns": "", "custom_status": "", "status": "online", "avatar": None, "banner": None, "join_sound": None,
-        "name_color": "", "theme": [], "badges": [], "created_at": created_at.isoformat(), "bot": True,
+        "name_color": "", "theme": [], "badges": [], "flair": {}, "created_at": created_at.isoformat(), "bot": True,
     }
     if avatar:
         out["avatar"] = {"url": avatar, "still": avatar, "animated": False}
