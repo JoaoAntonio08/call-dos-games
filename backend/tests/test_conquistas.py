@@ -44,3 +44,19 @@ def test_parse_flair_from_db_text():
     assert cq.parse_flair('{"name": "rgb", "x": "y", "plate": ""}') == {"name": "rgb"}
     assert cq.parse_flair("não é json") == {}
     assert cq.parse_flair(None) == {}
+
+
+def test_hours_are_not_rounded_up_before_unlocking(monkeypatch):
+    import asyncio
+
+    class FakePool:
+        async def fetchrow(self, *_a):
+            return {"call_seconds": 4 * 3600 + 58 * 60, "share_seconds": 0, "watch_seconds": 0}
+
+        async def fetchval(self, *_a):
+            return 0
+
+    monkeypatch.setattr(cq, "pool", lambda: FakePool())
+    values = asyncio.run(cq.values_of(1))
+    assert values["call"] < 5
+    assert "ring:pulse" not in cq.unlocked_from(values), "4h58 ainda não é 5 h"

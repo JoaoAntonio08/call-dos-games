@@ -59,3 +59,9 @@ test("traço novo entra uma vez só e lixo é ignorado", () => {
   assert.equal(applyBoardMsg(b, { type: "stroke", stroke: line("n1", "ana") }, "ana", false).length, 5);
   assert.equal(applyBoardMsg(b, { type: "stroke", stroke: { id: 3 } as never }, "ana", false), b);
 });
+
+test("traço que chega fica com quem mandou, mesmo se vier com outro dono escrito", () => {
+  const got = applyBoardMsg([], { type: "stroke", stroke: line("f1", "ana") }, "beto", false);
+  assert.equal(got[0].by, "beto", "não dá para desenhar como a Ana");
+  assert.deepEqual(applyBoardMsg(got, { type: "clear", scope: "mine" }, "ana", false).map((s) => s.id), ["f1"], "a Ana não apaga o traço do Beto");
+});

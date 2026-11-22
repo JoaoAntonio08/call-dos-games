@@ -63,7 +63,8 @@ export function applyBoardMsg(strokes: Stroke[], msg: BoardMsg, sender: string, 
   if (msg.type === "stroke") {
     const s = msg.stroke;
     if (!s || typeof s.id !== "string" || !Array.isArray(s.pts)) return strokes;
-    return strokes.some((x) => x.id === s.id) ? strokes : [...strokes, s];
+    // o dono é quem mandou de verdade, não o que veio escrito no traço (senão dava para desenhar "como" outra pessoa)
+    return strokes.some((x) => x.id === s.id) ? strokes : [...strokes, { ...s, by: sender }];
   }
   if (msg.type === "erase") {
     const ids = new Set(Array.isArray(msg.ids) ? msg.ids.slice(0, 500) : []);
