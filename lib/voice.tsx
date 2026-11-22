@@ -180,6 +180,16 @@ export function useVoice() {
   return v;
 }
 
+/** Nada tocando: sem vídeo, ou o último chegou ao fim. Pausado no meio de propósito não conta.
+ *  (No fim, só o player de quem comandava fica "terminado"; os outros ficam "pausado" no último segundo.) */
+export function musicIdle(s: { playing: boolean; time: number } | null, p: { getPlayerState(): number; getDuration(): number } | null): boolean {
+  if (!s) return true;
+  if (s.playing) return false;
+  if (p?.getPlayerState() === 0) return true;
+  const d = p?.getDuration() ?? 0;
+  return d > 0 && s.time >= d - 1.5;
+}
+
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const call = useCall();
   // fim do vídeo: se tiver fila, o próximo entra sozinho (a função de verdade é definida mais abaixo)
@@ -668,18 +678,19 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [channelId, playQueued]);
 
-  // nada tocando e alguém pôs música na fila (/tocar no chat): a primeira da sala começa sozinha
-  const queueLen = useRef(queue.length);
+  // nada tocando e tem música na fila (/tocar no chat, o rádio escolheu a próxima, a anterior acabou):
+  // a primeira da fila começa sozinha. Quem dispara é quem vem primeiro na lista da call, uma vez por item.
   const ytState = yt.state;
   const ytPlayer = yt.playerRef;
+  const autoStarted = useRef("");
   useEffect(() => {
-    const grew = queue.length > queueLen.current;
-    queueLen.current = queue.length;
-    // "parado" = sem vídeo, ou o último terminou (pausado no fim)
-    const idle = !ytState || (!ytState.playing && ytPlayer.current?.getPlayerState() === 0);
-    if (!grew || !idle || !room || room.state !== "connected" || !queue[0]) return;
+    const next = queue[0];
+    if (!next || !room || room.state !== "connected" || autoStarted.current === next.id) return;
+    if (!musicIdle(ytState, ytPlayer.current)) return;
     const ids = [room.localParticipant.identity, ...room.remoteParticipants.keys()].sort();
-    if (ids[0] === room.localParticipant.identity) void playQueued(queue[0]);
+    if (ids[0] !== room.localParticipant.identity) return;
+    autoStarted.current = next.id;
+    void playQueued(next);
   }, [queue, ytState, ytPlayer, room, playQueued]);
 
   /* ---------------- o "DJ": a música aparece como mais um na call ---------------- */
