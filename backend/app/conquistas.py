@@ -61,7 +61,8 @@ def unlocked_from(values: dict[str, float]) -> list[str]:
 async def values_of(user_id: int) -> dict[str, float]:
     row = await pool().fetchrow("SELECT call_seconds, share_seconds, watch_seconds FROM user_stats WHERE user_id = $1", user_id)
     servers = await pool().fetchval("SELECT count(*) FROM servers WHERE owner_id = $1", user_id)
-    h = lambda s: round((s or 0) / 3600, 1)  # noqa: E731
+    # horas exatas: arredondar aqui liberava a etapa de 5 h com 4h57
+    h = lambda s: (s or 0) / 3600  # noqa: E731
     return {
         "call": h(row and row["call_seconds"]),
         "share": h(row and row["share_seconds"]),
@@ -100,7 +101,7 @@ async def my_achievements(me: Auth = CurrentUser) -> dict:
             "id": t["id"],
             "name": t["name"],
             "unit": t["unit"],
-            "value": values[t["id"]],
+            "value": round(values[t["id"]], 1) if t["unit"] else values[t["id"]],
             "max": t["steps"][-1][0],
             "steps": [{"at": at, "reward": r, "label": REWARDS[r], "unlocked": values[t["id"]] >= at} for at, r in t["steps"]],
         }

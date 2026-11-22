@@ -149,7 +149,7 @@ interface VoiceCtx {
   startSpin: (options: string[]) => void;
   /** fila de vídeos do canal da call */
   queue: QueueItem[];
-  playQueued: (item: QueueItem) => Promise<void>;
+  playQueued: (item: QueueItem) => Promise<boolean>;
   /** pode pausar/pular a música dos outros e tirar qualquer uma da fila */
   isDj: boolean;
   /** clipar momento */
@@ -657,14 +657,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const ytLoad = yt.load;
   const playQueued = useCallback(
     async (item: QueueItem) => {
-      if (!channelId) return;
+      if (!channelId) return false;
       // a música continua sendo de quem pôs na fila (é essa pessoa que pausa e pula)
       const owner = item.added_by ? { id: item.added_by, name: nameInChannel(channelId, item.added_by) } : undefined;
       ytLoad(`https://www.youtube.com/watch?v=${item.video_id}&t=${item.start}s`, owner);
       try {
         setQueue(channelId, await api<QueueItem[]>(`/queue/${item.id}?played=1`, { method: "DELETE" }));
+        return true;
       } catch {
-        /* alguém já tirou */
+        return false; // alguém já tirou, ou a rede falhou
       }
     },
     [channelId, ytLoad],
@@ -690,7 +691,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     const ids = [room.localParticipant.identity, ...room.remoteParticipants.keys()].sort();
     if (ids[0] !== room.localParticipant.identity) return;
     autoStarted.current = next.id;
-    void playQueued(next);
+    // não deu certo: libera para tentar de novo quando a fila ou o player mudarem
+    void playQueued(next).then((ok) => {
+      if (!ok && autoStarted.current === next.id) autoStarted.current = "";
+    });
   }, [queue, ytState, ytPlayer, room, playQueued]);
 
   /* ---------------- o "DJ": a música aparece como mais um na call ---------------- */
