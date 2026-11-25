@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Hash, ImagePlus, Lock, LogOut, Play, Trash2, Upload, Volume2 } from "lucide-react";
+import { Copy, Hash, ImagePlus, Lock, LogOut, Play, Sparkles, Trash2, Upload, Volume2 } from "lucide-react";
 import { api, errorText, upload } from "@/lib/api";
 import { logout, useStore } from "@/lib/store";
 import { closeModal, toast, useUI } from "@/lib/ui";
@@ -361,16 +361,28 @@ function UserSettings({ tab: initial }: { tab?: string }) {
         ...(platform ? ([["plataforma", "Plataforma"]] as [string, string][]) : []),
       ]}
       footer={
-        <button
-          type="button"
-          onClick={() => {
-            closeModal();
-            void logout();
-          }}
-          className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-1.5 text-[14px] text-[#ff8f92] hover:bg-rust hover:text-oat"
-        >
-          <LogOut className="size-4" /> Sair da conta
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              closeModal();
+              window.dispatchEvent(new Event("cdg:novidades"));
+            }}
+            className="mb-1 flex w-full items-center gap-2 rounded-[9px] px-2.5 py-1.5 text-[14px] text-oat/70 hover:bg-cocoa-4 hover:text-oat"
+          >
+            <Sparkles className="size-4" /> Novidades
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              closeModal();
+              void logout();
+            }}
+            className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-1.5 text-[14px] text-[#ff8f92] hover:bg-rust hover:text-oat"
+          >
+            <LogOut className="size-4" /> Sair da conta
+          </button>
+        </>
       }
     >
       {tab === "perfil" && <ProfileTab />}

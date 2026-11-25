@@ -253,7 +253,12 @@ export function Landing() {
 
       <footer className="mx-auto flex max-w-[1240px] flex-wrap items-center justify-between gap-3 px-5 pb-10 text-[13px] text-oat/40 sm:px-8">
         <span className="font-display text-[16px] text-oat/60">Call dos Games</span>
-        <span>Melhor no Chrome ou Edge · use fone na call</span>
+        <span>
+          <Link href="/novidades" className="mr-3 font-semibold text-oat/60 hover:text-oat">
+            Novidades
+          </Link>
+          Melhor no Chrome ou Edge · use fone na call
+        </span>
       </footer>
     </main>
   );
