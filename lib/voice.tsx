@@ -7,6 +7,7 @@ import { gateway, loadQueue, nameInChannel, setQueue, useNameInChannel, useStore
 import { OWN_AUDIO_OFF, RESOLUTIONS, useCall, type Call, type PeerMeta, type ResolutionId } from "./use-call";
 import { useYouTubeSync } from "./use-youtube-sync";
 import { useClipper } from "./clipper";
+import { useLaughDetector } from "./laugh";
 import { toast } from "./ui";
 import { applyBoardMsg, leadsBoard, type BoardMsg, type Stroke } from "./board";
 import type { Attachment, NowPlaying, QueueItem, Sound } from "./types";
@@ -28,9 +29,11 @@ export interface VoicePrefs {
   startMuted: boolean;
   /** guarda os últimos ~40 s da call (tela ou só áudio) para clipar */
   clipBuffer: boolean;
+  /** clipe de risada: o app ouve SÓ o seu microfone, no PC, e avisa quando você ri */
+  laughClips: boolean;
 }
 
-const DEFAULT_PREFS: VoicePrefs = { ptt: false, pttKey: "KeyV", noiseSuppression: true, sfxVolume: 0.7, joinVolume: 0.7, joinSounds: true, startMuted: false, clipBuffer: true };
+const DEFAULT_PREFS: VoicePrefs = { ptt: false, pttKey: "KeyV", noiseSuppression: true, sfxVolume: 0.7, joinVolume: 0.7, joinSounds: true, startMuted: false, clipBuffer: true, laughClips: true };
 
 function loadPrefs(): VoicePrefs {
   try {
@@ -157,7 +160,7 @@ interface VoiceCtx {
     available: boolean;
     supported: boolean;
     busy: boolean;
-    save: () => Promise<void>;
+    save: (label?: string) => Promise<void>;
     /** "audio" quando não tem tela nenhuma: o clipe sai só com as vozes */
     kind: "video" | "audio";
     /** sua tela gravando só para clipes (sem transmitir) */
@@ -784,7 +787,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   });
   const clipperClip = clipper.clip;
   const sharerName = sharer ? (sharer.isLocal ? myName : nameInChannel(channelId, sharer.identity, sharer.name)) : useOwn ? myName : undefined;
-  const saveClip = useCallback(async () => {
+  const saveClip = useCallback(async (label?: string) => {
     if (!channelId) return;
     const res = await clipperClip();
     if (!res) {
@@ -808,9 +811,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       await api(`/channels/${target.id}/messages`, {
         json: {
           content:
-            res.kind === "audio"
+            (label ? `${label} · ` : "") +
+            (res.kind === "audio"
               ? `🎙️ Clipe de áudio${voiceName ? ` da ${voiceName}` : " da call"}`
-              : `🎬 Clipe${sharerName ? ` da tela de ${sharerName}` : ""}${voiceName ? ` na ${voiceName}` : ""}`,
+              : `🎬 Clipe${sharerName ? ` da tela de ${sharerName}` : ""}${voiceName ? ` na ${voiceName}` : ""}`),
           attachment_ids: [up.id],
         },
       });
@@ -835,6 +839,36 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     }),
     [clipper.ready, clipper.supported, clipper.busy, clipper.kind, saveClip, ownScreen, toggleOwnScreen],
   );
+
+  /* ---------------- clipe de risada ---------------- */
+  // o detector só ouve o SEU microfone, no seu PC; o servidor junta quem riu e escolhe UM app para clipar
+  const myMic = call.peers.find((p) => p.isLocal)?.mic?.mediaStreamTrack;
+  const laughOn = !!channelId && prefs.laughClips && call.peers.length >= 2;
+  const canClipRef = useRef(false);
+  useEffect(() => {
+    canClipRef.current = prefs.clipBuffer && clipper.ready;
+  }, [prefs.clipBuffer, clipper.ready]);
+  const onLaugh = useCallback(() => {
+    if (!channelId) return;
+    void api("/voice/risada", { json: { channel_id: channelId, can_clip: canClipRef.current } }).catch(() => {});
+  }, [channelId]);
+  useLaughDetector({ enabled: laughOn, track: myMic, onLaugh });
+  useEffect(() => {
+    const onRisada = (e: Event) => {
+      if ((e as CustomEvent<{ channel_id: string }>).detail?.channel_id === channelId) pushReaction("😂", "A call inteira");
+    };
+    const onClipIt = (e: Event) => {
+      if ((e as CustomEvent<{ channel_id: string }>).detail?.channel_id !== channelId) return;
+      // espera a risada terminar para ela caber no clipe
+      window.setTimeout(() => void saveClip("😂 Momento de risada"), 3500);
+    };
+    window.addEventListener("cdg:risada", onRisada);
+    window.addEventListener("cdg:risada-clip", onClipIt);
+    return () => {
+      window.removeEventListener("cdg:risada", onRisada);
+      window.removeEventListener("cdg:risada-clip", onClipIt);
+    };
+  }, [channelId, pushReaction, saveClip]);
 
   // app de Windows: atalho global (Alt+Shift+C) clipa mesmo com o jogo na frente
   const clipNow = useRef<(() => void) | null>(null);

@@ -6,7 +6,7 @@ import { api, errorText } from "@/lib/api";
 import { loadShows, setShows, useStore, useUser } from "@/lib/store";
 import { toast, useUI } from "@/lib/ui";
 import { agoOf } from "@/lib/format";
-import type { Server, Show, ShowKind, ShowStatus } from "@/lib/types";
+import type { Server, Show, ShowKind, ShowStatus, User } from "@/lib/types";
 
 /* ------------------------------------------------------------------ */
 /* Onde paramos: a lista do que a turma está assistindo/jogando         */
@@ -108,9 +108,73 @@ export function ShowsView({ server }: { server: Server }) {
               );
             })
           )}
+
+          <SeenInCall serverId={server.id} />
         </div>
       </div>
     </div>
+  );
+}
+
+interface Seen {
+  video_id: string;
+  title: string;
+  author: string;
+  times: number;
+  last_at: string;
+  by: User[];
+}
+
+/** O que tocou no YouTube das calls (últimos 60 dias): aparece sozinho, dá para pôr na lista. */
+function SeenInCall({ serverId }: { serverId: string }) {
+  const [list, setList] = useState<Seen[] | null>(null);
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api<Seen[]>(`/servers/${serverId}/visto-na-call`)
+      .then((r) => alive && setList(r))
+      .catch(() => alive && setList([]));
+    return () => {
+      alive = false;
+    };
+  }, [serverId]);
+  if (!list?.length) return null;
+  const shown = all ? list : list.slice(0, 8);
+  return (
+    <section className="mt-12">
+      <h3 className="label text-oat/45">Visto na call · {list.length}</h3>
+      <p className="mt-1 text-[13px] text-oat/40">Os vídeos que vocês assistiram juntos no YouTube da call, nos últimos 60 dias.</p>
+      <ul className="mt-3 divide-y divide-oat/[0.06]">
+        {shown.map((v) => (
+          <li key={v.video_id} className="flex items-center gap-3 py-2.5">
+            <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`} target="_blank" rel="noreferrer noopener" className="shrink-0 overflow-hidden rounded-[8px]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`https://i.ytimg.com/vi/${encodeURIComponent(v.video_id)}/mqdefault.jpg`} alt="" className="h-[45px] w-[80px] object-cover" loading="lazy" />
+            </a>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[14.5px] font-medium">{v.title || "Vídeo do YouTube"}</p>
+              <p className="truncate text-[12.5px] text-oat/45">
+                {v.author}
+                {v.times > 1 ? ` · tocou ${v.times}×` : ""} · {agoOf(v.last_at)}
+                {v.by.length ? ` · por ${v.by.map((u) => u.display_name).join(", ")}` : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void save(serverId, `/servers/${serverId}/shows`, "POST", { title: (v.title || "Vídeo do YouTube").slice(0, 120), kind: "outro", status: "done" }).then((ok) => ok && toast("Foi para a lista, em Terminado."))}
+              className="press shrink-0 rounded-full px-2.5 py-1 text-[12.5px] font-semibold text-ember-2 hover:bg-cocoa-3"
+            >
+              Pôr na lista
+            </button>
+          </li>
+        ))}
+      </ul>
+      {list.length > 8 && (
+        <button type="button" onClick={() => setAll(!all)} className="mt-2 text-[13px] font-semibold text-oat/50 hover:text-oat">
+          {all ? "Mostrar menos" : `Ver todos (${list.length})`}
+        </button>
+      )}
+    </section>
   );
 }
 

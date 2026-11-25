@@ -574,6 +574,10 @@ function handleEvent(t: string, d: any) {
     case "share_block":
     case "share_unblock":
     case "conquista":
+    case "risada":
+    case "risada_clip":
+    case "minigame":
+    case "recados":
       window.dispatchEvent(new CustomEvent(`cdg:${t.replace("_", "-")}`, { detail: d }));
       break;
   }

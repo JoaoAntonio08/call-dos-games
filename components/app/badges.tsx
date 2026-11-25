@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Crown, Radio, Users } from "lucide-react";
+import { Crown, Globe2, Moon, Music2, Radio, Timer, Users, VenetianMask } from "lucide-react";
 import { badgesOf, PLATES } from "@/lib/badges";
 import type { User } from "@/lib/types";
 
@@ -20,7 +20,7 @@ export function BadgeRow({ user, className = "" }: { user: Pick<User, "badges" |
   );
 }
 
-const PLATE_ICON = { crown: Crown, radio: Radio, users: Users };
+const PLATE_ICON = { crown: Crown, radio: Radio, users: Users, moon: Moon, timer: Timer, mask: VenetianMask, music: Music2, globe: Globe2 };
 
 /** Placa da vitrine do perfil. A holográfica inclina e troca de cor com o mouse. */
 export function Plate({ id, className = "" }: { id?: string; className?: string }) {

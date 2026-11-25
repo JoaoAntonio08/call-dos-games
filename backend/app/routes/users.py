@@ -124,9 +124,9 @@ async def update_me(body: MeIn, me: Auth = CurrentUser) -> dict:
             raise err(400, f"Escolha até {MAX_BADGES} insígnias da lista.")
         sets["badges"] = picked
     if body.flair is not None:
-        from ..conquistas import SLOTS, clean_flair, unlocked_from, values_of
+        from ..conquistas import SLOTS, clean_flair, unlocked_for
 
-        unlocked = unlocked_from(await values_of(me.id))
+        unlocked = await unlocked_for(me.id)
         wanted = {k: v for k, v in body.flair.items() if k in SLOTS and v}
         kept = clean_flair(wanted, unlocked)
         if kept != wanted:

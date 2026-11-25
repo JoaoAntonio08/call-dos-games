@@ -498,6 +498,30 @@ function AchievementsTab() {
       <FormError>{error}</FormError>
       {!data && !error && <p className="text-[14px] text-oat/50">Carregando…</p>}
       {data?.tracks.map((t) => <TrackCard key={t.id} track={t} />)}
+      {data && (
+        <section className="mb-3 rounded-[8px] bg-cocoa-3 px-4 py-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-[15px] font-semibold">Secretas</h3>
+            <span className="text-[12.5px] text-oat/50">
+              {data.secrets?.length ?? 0} de {data.secrets_total ?? 0} encontradas
+            </span>
+          </div>
+          <p className="mt-1 text-[13px] text-oat/55">Ninguém sabe como se libera até alguém conseguir. Jogue, fique em call, explore.</p>
+          {!!data.secrets?.length && (
+            <ul className="mt-3 space-y-1.5">
+              {data.secrets.map((s) => (
+                <li key={s.code} className="flex items-center justify-between gap-3 text-[13.5px]">
+                  <span>
+                    <b className="font-semibold">{s.name}</b>
+                    <span className="block text-[12.5px] text-oat/55">{s.how}</span>
+                  </span>
+                  <span className="shrink-0 text-[12.5px] text-[#23a55a]">{s.label}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -558,6 +582,8 @@ function FlairSection() {
             {options.map((o) => {
               const reward = `${slot}:${o.value}`;
               const ok = unlocked.has(reward);
+              // secreta que você ainda não achou nem aparece
+              if (!ok && "secret" in o && o.secret) return null;
               const on = flair[slot] === o.value;
               return (
                 <button
@@ -1072,6 +1098,15 @@ function VoiceTab() {
         <label className="flex items-center justify-between gap-4 py-1">
           <span className="text-[14.5px] font-medium">Guardar os últimos segundos para clipar</span>
           <Toggle checked={v.prefs.clipBuffer} onChange={(x) => set({ clipBuffer: x })} label="Clipes" />
+        </label>
+        <label className="flex items-center justify-between gap-4 py-1">
+          <span>
+            <span className="block text-[14.5px] font-medium">Clipe de risada</span>
+            <span className="block text-[12.5px] text-oat/50">
+              Quando duas pessoas riem juntas, o lance vira clipe sozinho. O app ouve só o seu microfone, aqui no seu PC: nenhum áudio sai daqui para isso.
+            </span>
+          </span>
+          <Toggle checked={v.prefs.laughClips} onChange={(x) => set({ laughClips: x })} label="Clipe de risada" />
         </label>
       </Section>
       <Section title="Dispositivos" hint={room ? undefined : "A troca vale para a próxima call; dentro da call muda na hora."}>

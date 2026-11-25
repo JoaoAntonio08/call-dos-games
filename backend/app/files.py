@@ -27,6 +27,7 @@ LIMITS = {
     "emoji": 1 * MB,
     "sticker": 3 * MB,
     "sound": 2 * MB,
+    "recado": 1 * MB,
     "attachment": 25 * MB,
 }
 IMAGE_KINDS = {"avatar", "banner", "icon", "emoji", "sticker"}
@@ -120,6 +121,10 @@ async def file_access_allowed(row: Any, me: Auth | None) -> bool:
         me.id,
     ):
         return True
+    if row["kind"] == "recado":
+        # recado de voz da call: quem enxerga o canal ouve
+        channel_id = await pool().fetchval("SELECT channel_id FROM recados WHERE file_id = $1", file_id)
+        return bool(channel_id and await can_access_channel(me.id, channel_id))
     if row["kind"] == "emoji" and await pool().fetchval(
         """SELECT 1 FROM emojis e JOIN members m ON m.server_id = e.server_id
            WHERE e.file_id = $1 AND m.user_id = $2""",
@@ -210,7 +215,7 @@ async def _save_upload_unlocked(upload: UploadFile, kind: str, owner_id: int, *,
         if animated:
             still_rel = f"{kind}/{file_id}.still.png"
             still_data = _still_frame(im)
-    elif kind == "sound":
+    elif kind in ("sound", "recado"):
         ext = Path(original).suffix.lower()
         if ext not in AUDIO_TYPES:
             raise err(400, "Som precisa ser MP3, OGG, WAV, WEBM ou M4A.")

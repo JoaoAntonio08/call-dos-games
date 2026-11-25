@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellOff, ChevronDown, Hash, HeadphoneOff, LogOut, MicOff, Music2, PartyPopper, Pause, Plus, Settings, Trophy, TvMinimalPlay, UserPlus, Users, Video, Volume2 } from "lucide-react";
+import { BellOff, CalendarDays, ChevronDown, Hash, HeadphoneOff, LogOut, MicOff, Music2, PartyPopper, Pause, Plus, Settings, Trophy, TvMinimalPlay, UserPlus, Users, Video, Volume2 } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { isUnread, markRead, useNameInServer, useStore, useUser, usePresence } from "@/lib/store";
 import { openModal, openProfile, openUserMenu, toast, type ServerPage } from "@/lib/ui";
@@ -152,6 +152,7 @@ export function ServerSidebar({ server, activeId, page }: { server: Server; acti
           <PageRow href={`/app/s/${server.id}/hall`} active={page === "hall"} icon={<Trophy />} label="Hall da Fama" />
           <PageRow href={`/app/s/${server.id}/lista`} active={page === "lista"} icon={<TvMinimalPlay />} label="Onde paramos" />
           <PageRow href={`/app/s/${server.id}/noites`} active={page === "noites"} icon={<PartyPopper />} label="Noite da turma" />
+          <PageRow href={`/app/s/${server.id}/retro`} active={page === "retro"} icon={<CalendarDays />} label="Retrospectiva" />
         </div>
         <Group title="Texto" onAdd={admin ? () => openModal({ kind: "create-channel", serverId: server.id, type: "text" }) : undefined}>
           {text.map((c) => (

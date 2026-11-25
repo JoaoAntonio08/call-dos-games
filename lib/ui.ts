@@ -77,7 +77,7 @@ export function toast(text: string) {
   }, 4200);
 }
 
-export type ServerPage = "hall" | "lista" | "noites";
+export type ServerPage = "hall" | "lista" | "noites" | "retro";
 export type Route =
   | { kind: "home" }
   | { kind: "dm"; id: string }
@@ -88,7 +88,7 @@ export function useRoute(): Route {
   const slug = params.slug ?? [];
   if (slug[0] === "dm" && slug[1]) return { kind: "dm", id: slug[1] };
   if (slug[0] === "s" && slug[1]) {
-    if (slug[2] === "hall" || slug[2] === "lista" || slug[2] === "noites") return { kind: "server", serverId: slug[1], channelId: null, page: slug[2] };
+    if (slug[2] === "hall" || slug[2] === "lista" || slug[2] === "noites" || slug[2] === "retro") return { kind: "server", serverId: slug[1], channelId: null, page: slug[2] };
     return { kind: "server", serverId: slug[1], channelId: slug[2] ?? null };
   }
   return { kind: "home" };

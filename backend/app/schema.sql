@@ -411,3 +411,56 @@ CREATE TABLE IF NOT EXISTS user_stats (
     watch_seconds  BIGINT NOT NULL DEFAULT 0
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS flair JSONB NOT NULL DEFAULT '{}';
+
+-- minigames, recados e retrospectiva (2026-11)
+CREATE TABLE IF NOT EXISTS user_secrets (
+    user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code         TEXT NOT NULL,
+    unlocked_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, code)
+);
+CREATE TABLE IF NOT EXISTS user_counters (
+    user_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key      TEXT NOT NULL,
+    n        BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, key)
+);
+CREATE TABLE IF NOT EXISTS stats_monthly (
+    server_id      BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    user_id        BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    month          TEXT NOT NULL,              -- AAAA-MM (horário de Brasília)
+    call_seconds   BIGINT NOT NULL DEFAULT 0,
+    share_seconds  BIGINT NOT NULL DEFAULT 0,
+    watch_seconds  BIGINT NOT NULL DEFAULT 0,
+    games_won      INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, user_id, month)
+);
+-- o que tocou no YouTube da call: jogo de música, "visto na call" e retrospectiva
+CREATE TABLE IF NOT EXISTS music_log (
+    id          BIGSERIAL PRIMARY KEY,
+    server_id   BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    channel_id  BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    video_id    TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    author      TEXT NOT NULL DEFAULT '',
+    played_by   BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    from_radio  BOOLEAN NOT NULL DEFAULT FALSE,
+    played_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS music_log_server ON music_log (server_id, played_at DESC);
+-- recado de voz deixado na call vazia (some sozinho em 7 dias)
+CREATE TABLE IF NOT EXISTS recados (
+    id          BIGINT PRIMARY KEY,
+    channel_id  BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    file_id     BIGINT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    seconds     INT NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recados_channel ON recados (channel_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS recados_file ON recados (file_id);
+CREATE TABLE IF NOT EXISTS recado_ouvidos (
+    recado_id  BIGINT NOT NULL REFERENCES recados(id) ON DELETE CASCADE,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (recado_id, user_id)
+);
