@@ -50,13 +50,20 @@ export function themeBgOf(u: Pick<User, "theme">) {
 /* ------------------------------------------------------------------ */
 
 /** Placas da vitrine do perfil. "holo" brilha e muda de cor com o mouse. */
-export const PLATES: Record<string, { title: string; sub: string; tone: "prata" | "ouro" | "holo"; icon: "crown" | "radio" | "users" }> = {
+export type PlateIcon = "crown" | "radio" | "users" | "moon" | "timer" | "mask" | "music" | "globe";
+/** secret: só aparece (no seletor e na lista) depois que a pessoa libera. */
+export const PLATES: Record<string, { title: string; sub: string; tone: "prata" | "ouro" | "holo"; icon: PlateIcon; secret?: boolean }> = {
   live: { title: "Na tela", sub: "1 h transmitindo", tone: "prata", icon: "radio" },
   streamer: { title: "Streamer", sub: "25 h transmitindo", tone: "holo", icon: "radio" },
   crowd: { title: "Plateia", sub: "3 h assistindo a tela da turma", tone: "prata", icon: "users" },
   crowd_holo: { title: "Plateia fiel", sub: "25 h assistindo a tela da turma", tone: "holo", icon: "users" },
   founder: { title: "Fundador", sub: "Criou um servidor", tone: "ouro", icon: "crown" },
   founder_gold: { title: "Fundador", sub: "Criou três servidores", tone: "holo", icon: "crown" },
+  coruja: { title: "Coruja", sub: "Call com a turma de madrugada", tone: "holo", icon: "moon", secret: true },
+  maratona: { title: "Maratonista", sub: "6 horas seguidas em call", tone: "ouro", icon: "timer", secret: true },
+  impostor: { title: "Mestre do disfarce", sub: "Venceu 3 vezes como impostor", tone: "holo", icon: "mask", secret: true },
+  ouvido: { title: "Ouvido absoluto", sub: "Acertou 15 músicas", tone: "ouro", icon: "music", secret: true },
+  globo: { title: "Globo na mão", sub: "Cravou o lugar da foto", tone: "holo", icon: "globe", secret: true },
 };
 
 /** O que dá para escolher em cada lugar do perfil (o id da conquista é "lugar:valor"). */
@@ -67,7 +74,7 @@ export const FLAIR_SLOTS: { slot: keyof Flair; title: string; options: { value: 
   {
     slot: "plate",
     title: "Placa",
-    options: Object.entries(PLATES).map(([value, p]) => ({ value, label: p.tone === "holo" ? `${p.title} holográfica` : p.title })),
+    options: Object.entries(PLATES).map(([value, p]) => ({ value, label: p.tone === "holo" ? `${p.title} holográfica` : p.title, secret: !!p.secret })),
   },
 ];
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dices,
   Eraser,
+  Gamepad2,
   Headphones,
   HeadphoneOff,
   Maximize2,
@@ -45,6 +46,8 @@ import { Avatar } from "./bits";
 import { QueuePanel } from "./queue-panel";
 import { CallChat } from "./chat";
 import { HypeButton } from "./hype";
+import { GamePicker, GameStage, GAME_TITLES, useMinigame } from "./minigames";
+import { RecadoRecorder, RecadosInbox } from "./recados";
 
 /* ------------------------------------------------------------------ */
 /* página de um canal de voz                                           */
@@ -170,7 +173,7 @@ function InsideAvatar({ id }: { id: string }) {
 /* palco da call (usado no canal de voz e na chamada de conversa)      */
 /* ------------------------------------------------------------------ */
 
-type Dock = "share" | "yt" | "devices" | "fun" | "sounds" | "react" | null;
+type Dock = "share" | "yt" | "devices" | "fun" | "games" | "sounds" | "react" | null;
 
 /**
  * O palco é desmontado quando você sai da tela da call (vai ler o chat, por exemplo).
@@ -250,15 +253,26 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
     seenStrokes.current = n;
   }, [v.strokes.length, boardOpen]);
 
+  // minigame da call: abre o palco sozinho quando alguém começa um
+  const game = useMinigame(v.channelId);
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === v.channelId) setPinned("game");
+    };
+    window.addEventListener("cdg:minigame-open", on);
+    return () => window.removeEventListener("cdg:minigame-open", on);
+  }, [v.channelId]);
+
   const me = call.peers.find((p) => p.isLocal);
   const screens = call.peers.filter((p) => p.screen);
   const options = [
+    ...(game ? [{ id: "game", label: GAME_TITLES[game.kind] }] : []),
     ...(yt.state ? [{ id: "yt", label: "YouTube" }] : []),
     ...screens.map((p) => ({ id: `s:${p.identity}`, label: p.isLocal ? "Sua tela" : `Tela de ${nameInChannel(v.channelId, p.identity, p.name)}` })),
     ...(boardOpen ? [{ id: "board", label: "Quadro" }] : []),
     ...(rollOpen ? [{ id: "roll", label: "Roleta" }] : []),
   ];
-  const auto = yt.state ? "yt" : screens.length ? `s:${(screens.find((p) => !p.isLocal) ?? screens[0]).identity}` : boardOpen ? "board" : rollOpen ? "roll" : null;
+  const auto = game ? "game" : yt.state ? "yt" : screens.length ? `s:${(screens.find((p) => !p.isLocal) ?? screens[0]).identity}` : boardOpen ? "board" : rollOpen ? "roll" : null;
   // "grid" = a turma em grade, mesmo com tela, vídeo ou atividade aberta
   const stage = pinned === "grid" ? null : pinned && options.some((o) => o.id === pinned) ? pinned : auto;
   const tabs = options.length ? [{ id: "grid", label: "Pessoas" }, ...options] : [];
@@ -308,6 +322,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
                     <PipButton />
                   </div>
                 )}
+                {stage === "game" && game && v.channelId && <GameStage channelId={v.channelId} game={game} onClose={() => setPinned(null)} />}
                 {stage === "board" && <Whiteboard onClose={() => (setBoardOpen(false), setPinned(null))} />}
                 {stage === "roll" && <Roulette spin={v.spin} onClose={() => (setRollOpen(false), setPinned(null))} />}
               </div>
@@ -327,6 +342,11 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
           </>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto">
+            {server && v.channelId && (
+              <div className="mb-3 flex w-full justify-center empty:hidden">
+                <RecadosInbox channelId={v.channelId} />
+              </div>
+            )}
             <div
               className="grid w-full gap-3"
               style={{
@@ -345,6 +365,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
                 {server && v.channelId && (
                   <>
                     <HypeButton channelId={v.channelId} />
+                    <RecadoRecorder channelId={v.channelId} mic={me?.mic?.mediaStreamTrack} />
                     <button type="button" onClick={() => openModal({ kind: "invite", serverId: server.id })} className="text-[13px] font-semibold text-ember-2 hover:underline">
                       Convidar alguém novo
                     </button>
@@ -401,7 +422,7 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
             {dock === "fun" && (
               <FunPanel
                 onPick={(what) => {
-                  setDock(what === "yt" ? "yt" : null);
+                  setDock(what === "yt" ? "yt" : what === "games" ? "games" : null);
                   if (what === "board") {
                     setBoardOpen(true);
                     setPinned("board");
@@ -410,6 +431,15 @@ export function CallStage({ server, compact, strip }: { server?: Server; compact
                     setRollOpen(true);
                     setPinned("roll");
                   }
+                }}
+              />
+            )}
+            {dock === "games" && v.channelId && (
+              <GamePicker
+                channelId={v.channelId}
+                onStarted={() => {
+                  setDock(null);
+                  setPinned("game");
                 }}
               />
             )}
@@ -630,8 +660,9 @@ function Sheet({ title, children, wide }: { title: string; children: React.React
   );
 }
 
-function FunPanel({ onPick }: { onPick: (what: "yt" | "board" | "roll") => void }) {
+function FunPanel({ onPick }: { onPick: (what: "yt" | "board" | "roll" | "games") => void }) {
   const items = [
+    { id: "games" as const, icon: <Gamepad2 />, title: "Minigames", text: "Impostor, Forca, Quina, Adivinhe a música e Onde foi isso? Todo mundo da call joga." },
     { id: "yt" as const, icon: <TvMinimalPlay />, title: "YouTube junto", text: "Cada um no seu player, play e pause para todos. Com fila votada." },
     { id: "board" as const, icon: <PenLine />, title: "Quadro", text: "Rabisquem juntos: mapa do chefe, jogo da velha, arte duvidosa." },
     { id: "roll" as const, icon: <Dices />, title: "Roleta", text: "Qual anime hoje? Quem paga a pizza? A roleta decide." },

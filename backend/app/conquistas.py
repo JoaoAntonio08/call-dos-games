@@ -49,7 +49,25 @@ REWARDS = {
     "plate:crowd_holo": "Placa holográfica Plateia fiel",
     "plate:founder": "Placa Fundador",
     "plate:founder_gold": "Placa Fundador dourada",
+    "plate:coruja": "Placa Coruja",
+    "plate:maratona": "Placa Maratonista",
+    "plate:impostor": "Placa Mestre do disfarce",
+    "plate:ouvido": "Placa Ouvido absoluto",
+    "plate:globo": "Placa Globo na mão",
 }
+
+# conquistas secretas: não aparecem até alguém liberar. Tudo é medido aqui no servidor.
+# código -> (enfeite, nome, como liberou)
+SECRETS: dict[str, tuple[str, str, str]] = {
+    "coruja": ("plate:coruja", "Coruja da madrugada", "Esteve numa call com a turma entre 3h e 5h da manhã."),
+    "maratona": ("plate:maratona", "Maratonista", "Ficou 6 horas seguidas na mesma call."),
+    "impostor": ("plate:impostor", "Mestre do disfarce", "Venceu 3 vezes como impostor."),
+    "ouvido": ("plate:ouvido", "Ouvido absoluto", "Acertou 15 músicas no Adivinhe a música."),
+    "globo": ("plate:globo", "Globo na mão", "Cravou o lugar da foto no Onde foi isso?"),
+}
+# contador -> (quanto precisa, conquista secreta)
+COUNTERS: dict[str, tuple[int, str]] = {"impostor": (3, "impostor"), "ouvido": (15, "ouvido"), "globo": (1, "globo")}
+BRT_OFFSET = -3 * 3600  # Brasília (sem horário de verão desde 2019)
 SLOTS = ("name", "ring", "banner", "plate")
 
 
@@ -94,7 +112,8 @@ def parse_flair(raw: Any) -> dict[str, str]:
 @router.get("/me/conquistas")
 async def my_achievements(me: Auth = CurrentUser) -> dict:
     values = await values_of(me.id)
-    unlocked = unlocked_from(values)
+    got = await secrets_of(me.id)
+    unlocked = unlocked_from(values) + [SECRETS[c][0] for c in got]
     flair = parse_flair(await pool().fetchval("SELECT flair FROM users WHERE id = $1", me.id))
     tracks = [
         {
@@ -107,7 +126,66 @@ async def my_achievements(me: Auth = CurrentUser) -> dict:
         }
         for t in TRACKS
     ]
-    return {"tracks": tracks, "unlocked": unlocked, "flair": flair}
+    hidden = [
+        {"code": c, "name": name, "how": how, "reward": reward, "label": REWARDS[reward], "unlocked": True}
+        for c, (reward, name, how) in SECRETS.items()
+        if c in got
+    ]
+    return {"tracks": tracks, "unlocked": unlocked, "flair": flair, "secrets": hidden, "secrets_total": len(SECRETS)}
+
+
+async def secrets_of(user_id: int) -> list[str]:
+    rows = await pool().fetch("SELECT code FROM user_secrets WHERE user_id = $1", user_id)
+    return [r["code"] for r in rows if r["code"] in SECRETS]
+
+
+async def unlocked_for(user_id: int) -> list[str]:
+    """Tudo que a pessoa pode usar: trilhas + secretas."""
+    return unlocked_from(await values_of(user_id)) + [SECRETS[c][0] for c in await secrets_of(user_id)]
+
+
+_known_secrets: set[tuple[int, str]] = set()
+
+
+async def unlock_secret(user_id: int, code: str) -> bool:
+    if code not in SECRETS or (user_id, code) in _known_secrets:
+        return False
+    new = await pool().fetchval(
+        "INSERT INTO user_secrets (user_id, code) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING code", user_id, code
+    )
+    _known_secrets.add((user_id, code))
+    if new:
+        reward, name, _ = SECRETS[code]
+        await hub.send([user_id], "conquista", {"reward": reward, "label": f"conquista secreta “{name}” ({REWARDS[reward]})"})
+    return bool(new)
+
+
+async def bump(user_id: int, key: str, n: int = 1) -> int:
+    """Soma num contador (jogos) e libera a secreta ligada a ele quando chega lá."""
+    total = await pool().fetchval(
+        """INSERT INTO user_counters (user_id, key, n) VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, key) DO UPDATE SET n = user_counters.n + EXCLUDED.n RETURNING n""",
+        user_id, key, n,
+    )
+    rule = COUNTERS.get(key)
+    if rule and int(total or 0) >= rule[0]:
+        await unlock_secret(user_id, rule[1])
+    return int(total or 0)
+
+
+def month_of(ts: float | None = None) -> str:
+    t = time.gmtime((ts or time.time()) + BRT_OFFSET)
+    return f"{t.tm_year:04d}-{t.tm_mon:02d}"
+
+
+async def won_game(server_id: int | None, user_id: int) -> None:
+    if not server_id:
+        return
+    await pool().execute(
+        """INSERT INTO stats_monthly (server_id, user_id, month, games_won) VALUES ($1, $2, $3, 1)
+           ON CONFLICT (server_id, user_id, month) DO UPDATE SET games_won = stats_monthly.games_won + 1""",
+        server_id, user_id, month_of(),
+    )
 
 
 # ------------------------------------------------------------------ contagem
@@ -174,3 +252,49 @@ async def stats_loop() -> None:
                 await announce(uid, fresh)
         except Exception as e:  # noqa: BLE001
             log.warning("conquistas: não deu para somar o tempo (%s)", type(e).__name__)
+        try:
+            await add_month(step)
+            for uid, code in night_and_marathon(hub.voice, time.time()):
+                await unlock_secret(uid, code)
+        except Exception as e:  # noqa: BLE001
+            log.warning("conquistas: não deu para somar o mês (%s)", type(e).__name__)
+
+
+def night_and_marathon(voice: dict[int, dict[int, dict]], now: float) -> list[tuple[int, str]]:
+    """Quem ganha Coruja (call com mais gente entre 3h e 5h de Brasília) e Maratonista (6 h seguidas)."""
+    hour = time.gmtime(now + BRT_OFFSET).tm_hour
+    out: list[tuple[int, str]] = []
+    for members in voice.values():
+        if len(members) < 2:
+            continue
+        for uid, st in members.items():
+            if 3 <= hour < 5:
+                out.append((uid, "coruja"))
+            since = st.get("since")
+            if isinstance(since, (int, float)) and now * 1000 - since >= 6 * 3600 * 1000:
+                out.append((uid, "maratona"))
+    return out
+
+
+_server_of_channel: dict[int, int | None] = {}
+
+
+async def add_month(seconds: float) -> None:
+    """Os mesmos minutos, separados por servidor e mês: base da retrospectiva."""
+    month = month_of()
+    for cid, members in list(hub.voice.items()):
+        if cid not in _server_of_channel:
+            _server_of_channel[cid] = await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", cid)
+        server_id = _server_of_channel[cid]
+        if not server_id:
+            continue
+        for uid, (c, sh, w) in credits({cid: members}, seconds).items():
+            await pool().execute(
+                """INSERT INTO stats_monthly (server_id, user_id, month, call_seconds, share_seconds, watch_seconds)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (server_id, user_id, month) DO UPDATE SET
+                     call_seconds = stats_monthly.call_seconds + EXCLUDED.call_seconds,
+                     share_seconds = stats_monthly.share_seconds + EXCLUDED.share_seconds,
+                     watch_seconds = stats_monthly.watch_seconds + EXCLUDED.watch_seconds""",
+                server_id, uid, month, int(c), int(sh), int(w),
+            )

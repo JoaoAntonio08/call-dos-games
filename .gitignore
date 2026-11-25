@@ -72,3 +72,6 @@ backend/ponte-voz/node_modules/
 *.key
 *.key.pub.bak
 desktop-tauri/release/
+
+# motor do detector de risada (copiado do node_modules no dev/build)
+/public/mediapipe/

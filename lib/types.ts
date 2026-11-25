@@ -327,8 +327,20 @@ export interface AchievementTrack {
   max: number;
   steps: AchievementStep[];
 }
+export interface SecretAchievement {
+  code: string;
+  name: string;
+  how: string;
+  reward: string;
+  label: string;
+  unlocked: boolean;
+}
+
 export interface Achievements {
   tracks: AchievementTrack[];
   unlocked: string[];
   flair: Flair;
+  /** só as secretas que você já achou (as outras o servidor nem manda) */
+  secrets?: SecretAchievement[];
+  secrets_total?: number;
 }

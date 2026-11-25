@@ -23,6 +23,7 @@ import { UserMenu } from "./user-menu";
 import { UpdateBanner } from "./update-banner";
 import { HypeAlert } from "./hype";
 import { NoiteAlert, NoitesView } from "./noites";
+import { RetroView } from "./retro";
 import { GameReporter } from "./jogo-app";
 import { Modals } from "./modals";
 
@@ -117,7 +118,7 @@ export function Shell() {
     document.title = channel
       ? `${channel.type === "text" ? "#" : ""}${channel.name} · ${server?.name}`
       : page && server
-        ? `${page === "hall" ? "Hall da Fama" : page === "noites" ? "Noite da turma" : "Onde paramos"} · ${server.name}`
+        ? `${page === "hall" ? "Hall da Fama" : page === "noites" ? "Noite da turma" : page === "retro" ? "Retrospectiva" : "Onde paramos"} · ${server.name}`
       : dm
         ? `${dm.recipients.map((u) => u.display_name).join(", ")} · Call dos Games`
         : "Call dos Games";
@@ -131,6 +132,7 @@ export function Shell() {
   if (server && page === "hall") main = <HallView server={server} />;
   if (server && page === "lista") main = <ShowsView server={server} />;
   if (server && page === "noites") main = <NoitesView server={server} />;
+  if (server && page === "retro") main = <RetroView server={server} />;
 
   const members = server && channel?.type === "text" && showMembers;
   // modo foco só vale na tela da call
