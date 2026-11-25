@@ -209,6 +209,8 @@ export interface VoiceMember {
   gain?: number;
   /** sem poder transmitir tela/câmera (passou do limite ou foi restringido) */
   noshare?: boolean;
+  /** aceitou o clipe de risada (só liga quando todo mundo na call aceitou) */
+  laugh?: boolean;
 }
 
 export interface Game {

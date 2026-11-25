@@ -19,7 +19,7 @@ def call(monkeypatch):
     """Uma call (canal 9) com 1, 2, 3 e 4 dentro; o 99 está fora."""
     h = Hub()
     for uid in (1, 2, 3, 4):
-        h.voice.setdefault(9, {})[uid] = {"stream": False}
+        h.voice.setdefault(9, {})[uid] = {"stream": False, "laugh": True}
         h.user_voice[uid] = 9
     sent: list[tuple[int, str, dict]] = []
 
@@ -33,10 +33,14 @@ def call(monkeypatch):
     async def no_mod(_cid, _uid):
         return False
 
+    async def is_open(_cid):
+        return True
+
     h.send = send
     monkeypatch.setattr(mg, "hub", h)
     monkeypatch.setattr(mg, "server_of", no_server)
     monkeypatch.setattr(mg, "can_moderate", no_mod)
+    monkeypatch.setattr(mg, "channel_open", is_open)
     monkeypatch.setattr(mg, "games", {})
     monkeypatch.setattr(mg, "_last_act", {})
     monkeypatch.setattr(mg, "_laughs", {})
@@ -257,6 +261,58 @@ async def test_laugh_clip_needs_two_different_people_and_picks_one_app(call):
     assert len([s for s in sent if s[1] == "risada_clip"]) == 1
     with pytest.raises(HTTPException):
         await mg.laugh(mg.LaughIn(channel_id="9"), Auth(99, 1))
+
+
+@pytest.mark.asyncio
+async def test_laugh_clip_needs_everyone_in_the_call_to_agree(call):
+    h, sent = call
+    h.voice[9][4]["laugh"] = False  # uma pessoa não aceitou: ninguém clipa
+    await mg.laugh(mg.LaughIn(channel_id="9", can_clip=True), Auth(2, 1))
+    r = await mg.laugh(mg.LaughIn(channel_id="9", can_clip=True), Auth(3, 1))
+    assert r.get("off") and not [s for s in sent if s[1] in ("risada", "risada_clip")]
+
+
+@pytest.mark.asyncio
+async def test_laugh_clip_is_off_with_someone_from_the_discord_bridge(call, monkeypatch):
+    from app.routes import discord as dc
+
+    h, sent = call
+    # quem está na call pelo Discord não tem como aceitar o clipe
+    monkeypatch.setattr(dc, "discord_voice_snapshot", lambda ids: {"9": [{"id": "x"}]})
+    await mg.laugh(mg.LaughIn(channel_id="9", can_clip=True), Auth(2, 1))
+    r = await mg.laugh(mg.LaughIn(channel_id="9", can_clip=True), Auth(3, 1))
+    assert r.get("off") and not [s for s in sent if s[1] in ("risada", "risada_clip")]
+
+
+@pytest.mark.asyncio
+async def test_reward_counts_once_per_phase(call, monkeypatch):
+    got: list[tuple[str, int | None, int]] = []
+
+    async def fake_reward(kind, server_id, uid, n=1):
+        got.append((kind, server_id, uid))
+
+    monkeypatch.setattr(mg, "_reward", fake_reward)
+    g = mg.Forca(9, 1, [1, 2], 77)
+    await g.give("win", 2)
+    await g.give("win", 2)  # o fim da rodada rodou de novo
+    assert got == [("win", 77, 2)]
+    g.public = False  # call privada: conta a secreta, mas não a retrospectiva do servidor
+    g.stage += 1
+    await g.give("win", 2)
+    assert got[-1] == ("win", None, 2)
+
+
+@pytest.mark.asyncio
+async def test_replacing_a_game_cancels_its_preparation(call):
+    import asyncio
+
+    g = mg.Mundo(9, 1, [1, 2], None)
+    g.setup({})
+    g.images = [(b"x", "image/jpeg")]
+    g.prep = asyncio.create_task(asyncio.sleep(60))
+    g.retire()
+    await asyncio.sleep(0)
+    assert g.prep is None and g.images == []
 
 
 # ------------------------------------------------------------------ secretas

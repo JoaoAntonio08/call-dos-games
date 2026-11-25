@@ -42,6 +42,9 @@ COMMONS = os.environ.get("COMMONS_BASE", "https://commons.wikimedia.org").rstrip
 UPLOADS = "https://upload.wikimedia.org/"
 USER_AGENT = "CallDosGames/2.5 (jogo entre amigos)"
 PHOTO_MAX = 4 * 1024 * 1024
+# memória: cada partida de fotos guarda até 10 fotos de 4 MB; e no máximo 2 preparações ao mesmo tempo
+MAX_PHOTO_GAMES = 4
+PREP_SLOTS = asyncio.Semaphore(2)
 
 
 def norm(s: str) -> str:
@@ -68,6 +71,11 @@ def throttle(uid: int, gap: float) -> bool:
 
 async def server_of(cid: int) -> int | None:
     return await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", cid)
+
+
+async def channel_open(cid: int) -> bool:
+    """Call sem cargo na visão (aberta a todo o servidor)."""
+    return bool(await pool().fetchval("SELECT cardinality(view_roles) = 0 FROM channels WHERE id = $1", cid))
 
 
 async def can_moderate(cid: int, uid: int) -> bool:
@@ -107,6 +115,12 @@ class Game:
         self.ends_at: int | None = None
         self.timer: asyncio.Task | None = None
         self.notice = ""
+        # uma coisa de cada vez por partida: jogada e cronômetro não mexem no estado ao mesmo tempo
+        self.lock = asyncio.Lock()
+        self.prep: asyncio.Task | None = None
+        self.rewarded: set[tuple[str, int, int]] = set()
+        # call com cargo na visão: vitória não entra na retrospectiva do servidor
+        self.public = True
 
     def join(self, uid: int) -> None:
         if uid not in self.players:
@@ -121,13 +135,14 @@ class Game:
 
         async def run() -> None:
             await asyncio.sleep(seconds)
-            if games.get(self.cid) is not self or self.stage != stage:
-                return
-            try:
-                await fn()
-                await push(self)
-            except Exception as e:  # noqa: BLE001
-                log.warning("minigames: cronômetro falhou (%s)", type(e).__name__)
+            async with self.lock:
+                if games.get(self.cid) is not self or self.stage != stage:
+                    return
+                try:
+                    await fn()
+                    await push(self)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("minigames: cronômetro falhou (%s)", type(e).__name__)
 
         self.timer = asyncio.create_task(run())
 
@@ -136,6 +151,23 @@ class Game:
             self.timer.cancel()
         self.timer = None
         self.ends_at = None
+
+    def retire(self) -> None:
+        """A partida saiu de cena: para cronômetro e preparação e solta as fotos da memória."""
+        self.cancel_timer()
+        if self.prep and not self.prep.done() and self.prep is not asyncio.current_task():
+            self.prep.cancel()
+        self.prep = None
+        if hasattr(self, "images"):
+            self.images = []
+
+    async def give(self, kind: str, uid: int) -> None:
+        """Recompensa uma vez só por pessoa em cada fase, mesmo se o fim da rodada rodar de novo."""
+        key = (kind, uid, self.stage)
+        if key in self.rewarded:
+            return
+        self.rewarded.add(key)
+        await _reward(kind, self.server_id if self.public else None, uid)
 
     def view(self, uid: int) -> dict[str, Any]:
         return {}
@@ -165,7 +197,7 @@ async def push(g: Game) -> None:
 async def finish(cid: int) -> None:
     g = games.pop(cid, None)
     if g:
-        g.cancel_timer()
+        g.retire()
         for uid in set(call_members(cid)) | set(g.players):
             await hub.send([uid], "minigame", {"channel_id": sid(cid), "game": None})
 
@@ -314,9 +346,9 @@ class Impostor(Game):
         champs = list(self.impostors) if winner == "impostor" else [p for p in self.players if p not in self.impostors]
         for p in champs:
             self.score[p] = self.score.get(p, 0) + (2 if winner == "impostor" else 1)
-            await _reward("win", self.server_id, p)
+            await self.give("win", p)
             if winner == "impostor":
-                await _reward("impostor", None, p)
+                await self.give("impostor", p)
 
 
 # ------------------------------------------------------------------ Forca
@@ -401,7 +433,7 @@ class Forca(Game):
         self.score[uid] += points
         self.solved = True
         self.phase = "end"
-        await _reward("win", self.server_id, uid)
+        await self.give("win", uid)
 
     def lose(self) -> None:
         self.lives = 0
@@ -483,7 +515,7 @@ class Quina(Game):
             self.streak += 1
             self.best = max(self.best, self.streak)
             self.phase = "end"
-            await _reward("win", self.server_id, uid)
+            await self.give("win", uid)
             self.schedule(5, self.next_word)
         elif len(self.rows) >= self.TRIES:
             self.streak = 0
@@ -553,10 +585,13 @@ class Musica(Game):
         pool_: dict[str, tuple[str, str, str]] = {}
         if self.style == "historico" and self.server_id:
             rows = await pool().fetch(
-                """SELECT DISTINCT ON (video_id) video_id, title, author FROM music_log
-                   WHERE server_id = $1 AND played_at > now() - interval '365 days' AND title <> ''
-                   ORDER BY video_id, played_at DESC LIMIT 400""",
+                """SELECT DISTINCT ON (m.video_id) m.video_id, m.title, m.author FROM music_log m
+                   JOIN channels c ON c.id = m.channel_id
+                   WHERE m.server_id = $1 AND m.played_at > now() - interval '365 days' AND m.title <> ''
+                     AND (m.channel_id = $2 OR cardinality(c.view_roles) = 0)
+                   ORDER BY m.video_id, m.played_at DESC LIMIT 400""",
                 self.server_id,
+                self.cid,
             )
             pool_ = {r["video_id"]: (r["video_id"], r["title"], r["author"]) for r in rows}
         query = STYLES[self.style] or STYLES["sucessos"]
@@ -597,7 +632,7 @@ class Musica(Game):
             if top > 0:
                 for p, n in self.score.items():
                     if n == top:
-                        await _reward("win", self.server_id, p)
+                        await self.give("win", p)
 
     def view(self, uid: int) -> dict[str, Any]:
         v: dict[str, Any] = {"round": self.round, "rounds": self.rounds, "got": [sid(p) for p in self.got], "style": self.style}
@@ -628,7 +663,7 @@ class Musica(Game):
         points = (3, 2)[len(self.got)] if len(self.got) < 2 else 1
         self.got.append(uid)
         self.score[uid] += points
-        await _reward("ouvido", None, uid)
+        await self.give("ouvido", uid)
         if all(p in self.got for p in call_members(self.cid)):
             await self.reveal()
         return {"ok": True}
@@ -814,7 +849,7 @@ class Mundo(Game):
                 top = max(self.score.values())
                 for p, n in self.score.items():
                     if n == top and top > 0:
-                        await _reward("win", self.server_id, p)
+                        await self.give("win", p)
             return
         self.round += 1
         self.guesses = {}
@@ -831,7 +866,7 @@ class Mundo(Game):
             self.score[uid] = self.score.get(uid, 0) + pts + ypts
             rows.append({"user_id": sid(uid), "lat": g["lat"], "lon": g["lon"], "year": g.get("year"), "km": round(km), "points": pts + ypts})
             if pts >= 4950:
-                await _reward("globo", None, uid)
+                await self.give("globo", uid)
         self.results = sorted(rows, key=lambda r: -r["points"])
         self.phase = "reveal"
         self.schedule(14, self.next_round)
@@ -923,15 +958,18 @@ async def start_game(channel_id: str, body: StartIn, me: Auth = CurrentUser) -> 
         raise err(400, f"Esse jogo precisa de pelo menos {cls.min_players} pessoas na call.")
     if body.kind == "musica" and (hub.music.get(cid) or {}).get("playing"):
         raise err(400, "Pausem a música da call antes de começar o Adivinhe a música.")
+    if body.kind == "mundo" and sum(1 for c, x in games.items() if isinstance(x, Mundo) and c != cid) >= MAX_PHOTO_GAMES:
+        raise err(503, "Tem muitas partidas de Onde foi isso? rolando agora. Tentem de novo daqui a pouco.")
     g = cls(cid, me.id, players, await server_of(cid))
+    g.public = await channel_open(cid)
     g.setup(body.model_dump())
     if cur:
-        cur.cancel_timer()
+        cur.retire()
     games[cid] = g
     if isinstance(g, (Musica, Mundo)):
         g.phase = "loading"
         await push(g)
-        asyncio.create_task(_prepare(g))
+        g.prep = asyncio.create_task(_prepare(g))
     else:
         await push(g)
     return {"ok": True}
@@ -939,16 +977,24 @@ async def start_game(channel_id: str, body: StartIn, me: Auth = CurrentUser) -> 
 
 async def _prepare(g: "Musica | Mundo") -> None:
     try:
-        await g.prepare()
+        async with PREP_SLOTS:  # poucas preparações (buscas e downloads) ao mesmo tempo no servidor
+            if games.get(g.cid) is not g:
+                return
+            await g.prepare()
+    except asyncio.CancelledError:
+        raise
     except Exception as e:  # noqa: BLE001
-        if games.get(g.cid) is g:
-            g.phase = "end"
-            g.notice = getattr(e, "detail", None) or "Não deu para preparar o jogo agora. Tentem de novo daqui a pouco."
-            await push(g)
+        async with g.lock:
+            if games.get(g.cid) is g:
+                g.phase = "end"
+                g.notice = getattr(e, "detail", None) or "Não deu para preparar o jogo agora. Tentem de novo daqui a pouco."
+                await push(g)
         return
-    if games.get(g.cid) is g:
-        await g.next_round()
-        await push(g)
+    async with g.lock:
+        if games.get(g.cid) is g:
+            g.prep = None
+            await g.next_round()
+            await push(g)
 
 
 @router.post("/calls/{channel_id}/minigame/act")
@@ -958,9 +1004,12 @@ async def act_game(channel_id: str, body: ActIn, me: Auth = CurrentUser) -> dict
     g = games.get(cid)
     if not g:
         raise err(404, "Nenhum jogo rolando nesta call.")
-    g.notice = ""
-    out = await g.act(me.id, body) or {}
-    await push(g)
+    async with g.lock:
+        if games.get(cid) is not g:
+            raise err(409, "Esse jogo acabou de mudar. Olhe de novo.")
+        g.notice = ""
+        out = await g.act(me.id, body) or {}
+        await push(g)
     return {"ok": True, **out}
 
 
@@ -1002,6 +1051,20 @@ async def games_cleanup_loop() -> None:
         for cid, d in list(_laughs.items()):
             if not d or now - max(t for t, _ in d.values()) > 60:
                 _laughs.pop(cid, None)
+        for uid, t in list(_last_report.items()):
+            if now - t > 60:
+                _last_report.pop(uid, None)
+        for cid, t in list(_last_laugh_clip.items()):
+            if now - t > LAUGH_COOLDOWN:
+                _last_laugh_clip.pop(cid, None)
+        if now - _pruned["music"] > 6 * 3600:
+            _pruned["music"] = now
+            try:
+                from .retro import prune_music_log  # noqa: PLC0415
+
+                await prune_music_log()
+            except Exception as e:  # noqa: BLE001
+                log.warning("minigames: limpeza do histórico de músicas falhou (%s)", type(e).__name__)
 
 
 # ------------------------------------------------------------------ clipe de risada
@@ -1010,6 +1073,23 @@ LAUGH_COOLDOWN = 90.0
 _laughs: dict[int, dict[int, tuple[float, bool]]] = {}
 _last_laugh_clip: dict[int, float] = {}
 _last_report: dict[int, float] = {}
+_pruned: dict[str, float] = {"music": -1e9}
+
+
+def laugh_allowed(cid: int) -> bool:
+    """Clipe de risada só quando TODO MUNDO na call ligou a opção (quem não quer, desliga para a call)."""
+    members = hub.voice.get(cid, {})
+    if len(members) < 2 or not all(bool(st.get("laugh")) for st in members.values()):
+        return False
+    # quem entra pela ponte do Discord não tem como aceitar: com gente de lá na call, não clipa
+    try:
+        from .routes.discord import discord_voice_snapshot  # noqa: PLC0415
+
+        if discord_voice_snapshot([cid]).get(sid(cid)):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 class LaughIn(BaseModel):
@@ -1026,8 +1106,9 @@ async def laugh(body: LaughIn, me: Auth = CurrentUser) -> dict:
     if now - _last_report.get(me.id, 0) < 2.0:
         return {"ok": True}
     _last_report[me.id] = now
-    if len(call_members(cid)) < 2:
-        return {"ok": True}
+    if not laugh_allowed(cid):
+        _laughs.pop(cid, None)
+        return {"ok": True, "off": True}
     d = _laughs.setdefault(cid, {})
     d[me.id] = (now, bool(body.can_clip))
     for uid, (t, _) in list(d.items()):
@@ -1035,11 +1116,11 @@ async def laugh(body: LaughIn, me: Auth = CurrentUser) -> dict:
             d.pop(uid, None)
     if len(d) < 2 or now - _last_laugh_clip.get(cid, -1e9) < LAUGH_COOLDOWN:
         return {"ok": True}
-    clippers = sorted(uid for uid, (_, ok) in d.items() if ok)
+    clippers = sorted(uid for uid, (_, ok) in d.items() if ok and in_call(uid, cid))
     d.clear()
     _last_laugh_clip[cid] = now
     members = call_members(cid)
-    await hub.send(members, "risada", {"channel_id": sid(cid)})
+    await hub.send(members, "risada", {"channel_id": sid(cid), "clip": bool(clippers)})
     if clippers:
         await hub.send([clippers[0]], "risada_clip", {"channel_id": sid(cid)})
     return {"ok": True, "clip": bool(clippers)}

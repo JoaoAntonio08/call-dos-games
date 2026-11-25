@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import time
+from pathlib import Path
 
 from fastapi import APIRouter, Form, UploadFile
 
+from .audio_len import audio_seconds
 from .core import Auth, CurrentUser, err, fetch_user, file_url, new_id, parse_id, pool, settings, sid, user_out
 from .perms import member as perms_member
 from .realtime import can_access_channel, hub
@@ -23,6 +27,8 @@ MAX_SECONDS = 30
 PER_AUTHOR = 3
 PER_CHANNEL = 20
 KEEP_DAYS = 7
+TOLERANCE = 1.0  # o gravador para um pouquinho depois dos 30 s
+RECADO_TYPES = {".webm", ".m4a", ".ogg", ".opus"}  # o que o MediaRecorder grava
 
 
 async def _voice_channel(user_id: int, channel_id: int) -> dict:
@@ -32,13 +38,34 @@ async def _voice_channel(user_id: int, channel_id: int) -> dict:
     return ch
 
 
+def _unlink(rel: str | None) -> None:
+    if not rel:
+        return
+    try:
+        (settings.upload_dir / rel).unlink(missing_ok=True)
+    except OSError:
+        pass  # a faxina de hora em hora tenta de novo
+
+
 async def _drop_file(file_id: int) -> None:
-    row = await pool().fetchrow("DELETE FROM files WHERE id = $1 RETURNING path", file_id)
-    if row:
-        try:
-            (settings.upload_dir / row["path"]).unlink(missing_ok=True)
-        except OSError:
-            pass
+    _unlink(await pool().fetchval("DELETE FROM files WHERE id = $1 RETURNING path", file_id))
+
+
+async def _counts(db, cid: int, uid: int) -> tuple[int, int]:
+    row = await db.fetchrow(
+        f"""SELECT count(*) FILTER (WHERE author_id = $2) AS mine, count(*) AS total FROM recados
+            WHERE channel_id = $1 AND created_at > now() - interval '{KEEP_DAYS} days'""",
+        cid,
+        uid,
+    )
+    return int(row["mine"]), int(row["total"])
+
+
+def _check_limits(mine: int, total: int) -> None:
+    if mine >= PER_AUTHOR:
+        raise err(429, f"Você já deixou {PER_AUTHOR} recados nesta call. Apague um para gravar outro.")
+    if total >= PER_CHANNEL:
+        raise err(429, "Esta call já está cheia de recados.")
 
 
 @router.get("/channels/{channel_id}/recados")
@@ -78,30 +105,42 @@ async def create_recado(channel_id: str, file: UploadFile, seconds: int = Form(0
         raise err(403, "Entre na call para deixar um recado.")
     if set(hub.voice.get(cid, {})) != {me.id}:
         raise err(400, "Recado é para quando a call está vazia: tem gente aqui, fala com eles!")
-    if not (1 <= seconds <= MAX_SECONDS):
+    if Path(file.filename or "").suffix.lower() not in RECADO_TYPES:
+        raise err(400, "O recado precisa ser gravado pelo app (WebM, OGG ou M4A).")
+    _check_limits(*await _counts(pool(), cid, me.id))  # recusa cedo, antes de gravar o arquivo
+    from .files import LIMITS, save_upload  # noqa: PLC0415
+
+    # a duração vem do próprio áudio, não do que o app diz
+    data = await file.read(LIMITS["recado"] + 1)
+    await file.seek(0)
+    real = audio_seconds(data[: LIMITS["recado"]]) if len(data) <= LIMITS["recado"] else None
+    if real is None:
+        raise err(400, "Não deu para ler esse áudio. Grave de novo pelo botão do recado.")
+    if real > MAX_SECONDS + TOLERANCE:
         raise err(400, f"O recado precisa ter até {MAX_SECONDS} segundos.")
-    mine, total = await pool().fetchrow(
-        f"""SELECT count(*) FILTER (WHERE author_id = $2), count(*) FROM recados
-            WHERE channel_id = $1 AND created_at > now() - interval '{KEEP_DAYS} days'""",
-        cid,
-        me.id,
-    )
-    if mine >= PER_AUTHOR:
-        raise err(429, f"Você já deixou {PER_AUTHOR} recados nesta call. Apague um para gravar outro.")
-    if total >= PER_CHANNEL:
-        raise err(429, "Esta call já está cheia de recados.")
-    from .files import save_upload  # noqa: PLC0415
+    if real < 0.5:
+        raise err(400, "Recado curtinho demais.")
+    seconds = max(1, min(MAX_SECONDS, math.ceil(real)))
 
     up = await save_upload(file, "recado", me.id)
+    file_id = parse_id(up["id"])
     rid = new_id()
-    await pool().execute(
-        "INSERT INTO recados (id, channel_id, author_id, file_id, seconds) VALUES ($1, $2, $3, $4, $5)",
-        rid,
-        cid,
-        me.id,
-        parse_id(up["id"]),
-        seconds,
-    )
+    try:
+        async with pool().acquire() as con, con.transaction():
+            # dois envios ao mesmo tempo esperam um pelo outro e contam de novo: o limite não estoura
+            await con.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", f"recados:{cid}")
+            _check_limits(*await _counts(con, cid, me.id))
+            await con.execute(
+                "INSERT INTO recados (id, channel_id, author_id, file_id, seconds) VALUES ($1, $2, $3, $4, $5)",
+                rid,
+                cid,
+                me.id,
+                file_id,
+                seconds,
+            )
+    except BaseException:
+        await _drop_file(file_id)  # não deixa áudio sem recado para trás
+        raise
     await hub.to_channel(cid, "recados", {"channel_id": sid(cid)})
     return {"id": sid(rid)}
 
@@ -131,21 +170,50 @@ async def delete_recado(recado_id: str, me: Auth = CurrentUser) -> dict:
         who = await perms_member(row["server_id"], me.id) if row["server_id"] else None
         if not (who and who.can("moderar_voz")):
             raise err(403, "Só quem gravou (ou quem modera a call) apaga o recado.")
-    await pool().execute("DELETE FROM recados WHERE id = $1", rid)
-    await _drop_file(row["file_id"])
+    async with pool().acquire() as con, con.transaction():
+        await con.execute("DELETE FROM recados WHERE id = $1", rid)
+        path = await con.fetchval("DELETE FROM files WHERE id = $1 RETURNING path", row["file_id"])
+    _unlink(path)
     await hub.to_channel(row["channel_id"], "recados", {"channel_id": sid(row["channel_id"])})
     return {"ok": True}
 
 
+async def cleanup_recados() -> int:
+    """Recados velhos somem com o áudio; e a faxina pega o que ficou pela metade (registro sem
+    recado ou arquivo no disco sem registro) por causa de uma falha no meio do caminho."""
+    removed = 0
+    async with pool().acquire() as con, con.transaction():
+        old = await con.fetch(f"DELETE FROM recados WHERE created_at < now() - interval '{KEEP_DAYS} days' RETURNING file_id")
+        paths = await con.fetch(
+            """DELETE FROM files f WHERE f.kind = 'recado'
+                 AND (f.id = ANY($1::bigint[])
+                      OR (f.created_at < now() - interval '1 hour'
+                          AND NOT EXISTS (SELECT 1 FROM recados r WHERE r.file_id = f.id)))
+               RETURNING f.path""",
+            [r["file_id"] for r in old],
+        )
+    for r in paths:
+        _unlink(r["path"])
+        removed += 1
+    folder = settings.upload_dir / "recado"
+    if folder.is_dir():
+        known = {r["path"] for r in await pool().fetch("SELECT path FROM files WHERE kind = 'recado'")}
+        cutoff = time.time() - 3600
+        for f in folder.iterdir():
+            rel = f"recado/{f.name}"
+            try:
+                if f.is_file() and rel not in known and f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 async def recados_loop() -> None:
-    """Recados com mais de 7 dias somem (com o áudio)."""
     while True:
         try:
-            rows = await pool().fetch(
-                f"DELETE FROM recados WHERE created_at < now() - interval '{KEEP_DAYS} days' RETURNING file_id"
-            )
-            for r in rows:
-                await _drop_file(r["file_id"])
+            await cleanup_recados()
         except Exception as e:  # noqa: BLE001
             log.warning("recados: limpeza falhou (%s)", type(e).__name__)
         await asyncio.sleep(3600)

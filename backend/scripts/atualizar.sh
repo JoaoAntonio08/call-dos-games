@@ -19,6 +19,10 @@ as_app "cd backend/ponte-voz && npm ci --omit=dev --no-audit --no-fund"
 echo "==> site: dependências e build (uns 2 minutos)"
 # o .env.local tem o NEXT_PUBLIC_API_URL, que entra no build
 as_app "npm ci --no-audit --no-fund && npm run build"
+# o clipe de risada precisa do MediaPipe (copiado no build) e do modelo YAMNet (vem no repositório)
+for f in public/mediapipe/audio_wasm_internal.wasm public/models/yamnet.tflite; do
+  [[ -s "$APP/$f" ]] || { echo "ERRO: faltou $f (o clipe de risada não vai funcionar). Rode de novo ou avise."; exit 1; }
+done
 as_app "rm -rf .next/standalone/public .next/standalone/.next/static && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/"
 
 echo "==> reiniciando"

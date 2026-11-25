@@ -34,6 +34,13 @@ async def log_play(server_id: int | None, channel_id: int, video_id: str, title:
     )
 
 
+MUSIC_LOG_DAYS = 400  # a retrospectiva olha meses; o jogo, até 1 ano
+
+
+async def prune_music_log() -> None:
+    await pool().execute(f"DELETE FROM music_log WHERE played_at < now() - interval '{MUSIC_LOG_DAYS} days'")
+
+
 async def _member(server_id: int, user_id: int) -> None:
     if not await perms_member(server_id, user_id):
         raise err(404, "Servidor não encontrado.")
