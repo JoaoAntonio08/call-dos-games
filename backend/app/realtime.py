@@ -185,6 +185,8 @@ class Hub:
                 "deaf": bool(state.get("deaf", False)) or mods["deaf"],
                 "video": bool(state.get("video", False)),
                 "stream": bool(state.get("stream", False)),
+                # aceita o clipe de risada (só vale quando todo mundo da call aceitou)
+                "laugh": bool(state.get("laugh", False)),
                 "since": prev.get("since", int(time.time() * 1000)),
             }
             self.user_voice[user_id] = channel_id

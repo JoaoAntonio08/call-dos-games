@@ -276,16 +276,28 @@ def night_and_marathon(voice: dict[int, dict[int, dict]], now: float) -> list[tu
     return out
 
 
-_server_of_channel: dict[int, int | None] = {}
+_server_of_channel: dict[int, tuple[int | None, bool, float]] = {}
+CHANNEL_CACHE_SECONDS = 300
+
+
+async def _public_server_of(cid: int) -> int | None:
+    """Servidor da call, mas só se ela for aberta a todos (call com cargo na visão não entra na retrospectiva)."""
+    now = time.monotonic()
+    hit = _server_of_channel.get(cid)
+    if not hit or now - hit[2] > CHANNEL_CACHE_SECONDS:
+        row = await pool().fetchrow("SELECT server_id, cardinality(view_roles) = 0 AS open FROM channels WHERE id = $1", cid)
+        hit = (row["server_id"] if row else None, bool(row and row["open"]), now)
+        _server_of_channel[cid] = hit
+    return hit[0] if hit[1] else None
 
 
 async def add_month(seconds: float) -> None:
-    """Os mesmos minutos, separados por servidor e mês: base da retrospectiva."""
+    """Os mesmos minutos, separados por servidor e mês: base da retrospectiva (só calls abertas a todos)."""
     month = month_of()
+    for cid in [c for c in _server_of_channel if c not in hub.voice]:
+        _server_of_channel.pop(cid, None)
     for cid, members in list(hub.voice.items()):
-        if cid not in _server_of_channel:
-            _server_of_channel[cid] = await pool().fetchval("SELECT server_id FROM channels WHERE id = $1", cid)
-        server_id = _server_of_channel[cid]
+        server_id = await _public_server_of(cid)
         if not server_id:
             continue
         for uid, (c, sh, w) in credits({cid: members}, seconds).items():

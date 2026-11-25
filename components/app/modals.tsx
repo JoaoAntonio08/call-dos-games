@@ -1101,12 +1101,14 @@ function VoiceTab() {
         </label>
         <label className="flex items-center justify-between gap-4 py-1">
           <span>
-            <span className="block text-[14.5px] font-medium">Clipe de risada</span>
+            <span className="block text-[14.5px] font-medium">Aceito o clipe de risada</span>
             <span className="block text-[12.5px] text-oat/50">
-              Quando duas pessoas riem juntas, o lance vira clipe sozinho. O app ouve só o seu microfone, aqui no seu PC: nenhum áudio sai daqui para isso.
+              Quando a call cai na gargalhada, o momento (com as vozes e a tela da call) vira clipe no chat do servidor. Só acontece se todo mundo na call
+              tiver ligado isto: se você desligar, ninguém clipa a risada enquanto você estiver lá. Para perceber a risada, o app ouve só o seu
+              microfone, aqui no seu aparelho.
             </span>
           </span>
-          <Toggle checked={v.prefs.laughClips} onChange={(x) => set({ laughClips: x })} label="Clipe de risada" />
+          <Toggle checked={v.prefs.laughOk} onChange={(x) => set({ laughOk: x })} label="Aceito o clipe de risada" />
         </label>
       </Section>
       <Section title="Dispositivos" hint={room ? undefined : "A troca vale para a próxima call; dentro da call muda na hora."}>

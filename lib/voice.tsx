@@ -29,11 +29,15 @@ export interface VoicePrefs {
   startMuted: boolean;
   /** guarda os últimos ~40 s da call (tela ou só áudio) para clipar */
   clipBuffer: boolean;
-  /** clipe de risada: o app ouve SÓ o seu microfone, no PC, e avisa quando você ri */
-  laughClips: boolean;
+  /**
+   * aceito o clipe de risada (desligado até a pessoa ligar). O clipe só acontece quando TODO MUNDO na
+   * call aceitou; o detector ouve só o seu microfone, no seu aparelho. (Nome novo de propósito: quem
+   * tinha ligado na 2.5.0 por padrão começa desligado.)
+   */
+  laughOk: boolean;
 }
 
-const DEFAULT_PREFS: VoicePrefs = { ptt: false, pttKey: "KeyV", noiseSuppression: true, sfxVolume: 0.7, joinVolume: 0.7, joinSounds: true, startMuted: false, clipBuffer: true, laughClips: true };
+const DEFAULT_PREFS: VoicePrefs = { ptt: false, pttKey: "KeyV", noiseSuppression: true, sfxVolume: 0.7, joinVolume: 0.7, joinSounds: true, startMuted: false, clipBuffer: true, laughOk: false };
 
 function loadPrefs(): VoicePrefs {
   try {
@@ -285,8 +289,9 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       deaf,
       video: !!local?.camera,
       stream: !!local?.screen,
+      laugh: prefs.laughOk,
     });
-  }, [channelId, local?.micOn, local?.camera, local?.screen, deaf]);
+  }, [channelId, local?.micOn, local?.camera, local?.screen, deaf, prefs.laughOk]);
   useEffect(() => {
     if (call.status === "connected") report();
   }, [report, call.status]);
@@ -843,7 +848,13 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   /* ---------------- clipe de risada ---------------- */
   // o detector só ouve o SEU microfone, no seu PC; o servidor junta quem riu e escolhe UM app para clipar
   const myMic = call.peers.find((p) => p.isLocal)?.mic?.mediaStreamTrack;
-  const laughOn = !!channelId && prefs.laughClips && call.peers.length >= 2;
+  // só liga quando todo mundo da call aceitou (o servidor confere de novo antes de clipar)
+  const laughAll = useStore((s) => {
+    const members = channelId ? s.voice[channelId] : undefined;
+    return !!members && members.length >= 2 && members.every((m) => m.laugh);
+  });
+  const laughOn = !!channelId && prefs.laughOk && laughAll && call.peers.length >= 2;
+  const laughTimer = useRef<number | null>(null);
   const canClipRef = useRef(false);
   useEffect(() => {
     canClipRef.current = prefs.clipBuffer && clipper.ready;
@@ -855,16 +866,30 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   useLaughDetector({ enabled: laughOn, track: myMic, onLaugh });
   useEffect(() => {
     const onRisada = (e: Event) => {
-      if ((e as CustomEvent<{ channel_id: string }>).detail?.channel_id === channelId) pushReaction("😂", "A call inteira");
+      const d = (e as CustomEvent<{ channel_id: string; clip?: boolean }>).detail;
+      if (d?.channel_id !== channelId) return;
+      pushReaction("😂", "A call inteira");
+      // todo mundo fica sabendo que o momento vai virar clipe
+      if (d.clip) toast("😂 A call caiu na risada: o momento vai virar clipe no chat.");
     };
     const onClipIt = (e: Event) => {
-      if ((e as CustomEvent<{ channel_id: string }>).detail?.channel_id !== channelId) return;
-      // espera a risada terminar para ela caber no clipe
-      window.setTimeout(() => void saveClip("😂 Momento de risada"), 3500);
+      const cid = (e as CustomEvent<{ channel_id: string }>).detail?.channel_id;
+      if (!cid || cid !== channelId) return;
+      if (laughTimer.current) window.clearTimeout(laughTimer.current);
+      // espera a risada terminar para ela caber no clipe; antes de salvar, confere tudo de novo
+      laughTimer.current = window.setTimeout(() => {
+        laughTimer.current = null;
+        const members = useStore.getState().voice[cid] ?? [];
+        const stillOk = prefsRef.current.laughOk && members.length >= 2 && members.every((m) => m.laugh);
+        if (stillOk) void saveClip("😂 Momento de risada");
+      }, 3500);
     };
     window.addEventListener("cdg:risada", onRisada);
     window.addEventListener("cdg:risada-clip", onClipIt);
     return () => {
+      // saiu ou trocou de call: o clipe marcado não sai mais
+      if (laughTimer.current) window.clearTimeout(laughTimer.current);
+      laughTimer.current = null;
       window.removeEventListener("cdg:risada", onRisada);
       window.removeEventListener("cdg:risada-clip", onClipIt);
     };
