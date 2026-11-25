@@ -274,3 +274,23 @@ def test_secret_rewards_are_real_rewards():
         assert reward in cq.REWARDS
     assert cq.clean_flair({"plate": "coruja"}, []) == {}
     assert cq.clean_flair({"plate": "coruja"}, ["plate:coruja"]) == {"plate": "coruja"}
+
+
+def test_strip_jpeg_meta_drops_exif_and_keeps_image():
+    from app.minigames import strip_jpeg_meta
+
+    def seg(marker: int, body: bytes) -> bytes:
+        return bytes([0xFF, marker]) + (len(body) + 2).to_bytes(2, "big") + body
+
+    jfif = seg(0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+    exif = seg(0xE1, b"Exif\x00\x00GPS-AQUI")
+    com = seg(0xFE, b"tirada em Paris")
+    dqt = seg(0xDB, b"\x00" + bytes(64))
+    scan = b"\xff\xda\x00\x08\x01\x01\x00\x00?\x00" + b"\x124" + b"\xff\xd9"
+    raw = b"\xff\xd8" + jfif + exif + com + dqt + scan
+    clean = strip_jpeg_meta(raw)
+    assert clean == b"\xff\xd8" + jfif + dqt + scan
+    assert b"GPS-AQUI" not in clean and b"Paris" not in clean
+    assert strip_jpeg_meta(b"GIF89a") is None
+    assert strip_jpeg_meta(b"\xff\xd8\xff\xe1\xff\xff") is None
+

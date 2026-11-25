@@ -715,7 +715,34 @@ async def fetch_photo_bytes(c: httpx.AsyncClient, url: str) -> tuple[bytes, str]
             buf += chunk
             if len(buf) > PHOTO_MAX:
                 return None
-    return bytes(buf), "image/jpeg"
+    clean = strip_jpeg_meta(bytes(buf))
+    return (clean, "image/jpeg") if clean else None
+
+
+def strip_jpeg_meta(data: bytes) -> bytes | None:
+    """Tira EXIF/XMP/comentários do JPEG (APP1..APP15 e COM): a foto do Commons costuma trazer
+    GPS e data no EXIF, e daria para colar a resposta baixando a imagem. None = JPEG malformado."""
+    if data[:2] != b"\xff\xd8":
+        return None
+    out = bytearray(b"\xff\xd8")
+    i = 2
+    while i + 4 <= len(data):
+        if data[i] != 0xFF:
+            return None
+        marker = data[i + 1]
+        if marker == 0xFF:  # preenchimento
+            i += 1
+            continue
+        if marker == 0xDA:  # começo da imagem em si: dali para frente vai tudo
+            out += data[i:]
+            return bytes(out)
+        size = int.from_bytes(data[i + 2 : i + 4], "big")
+        if size < 2 or i + 2 + size > len(data):
+            return None
+        if not (0xE1 <= marker <= 0xEF or marker == 0xFE):
+            out += data[i : i + 2 + size]
+        i += 2 + size
+    return None
 
 
 def distance_km(a: tuple[float, float], b: tuple[float, float]) -> float:
