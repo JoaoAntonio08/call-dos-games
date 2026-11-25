@@ -350,3 +350,62 @@ def test_strip_jpeg_meta_drops_exif_and_keeps_image():
     assert strip_jpeg_meta(b"GIF89a") is None
     assert strip_jpeg_meta(b"\xff\xd8\xff\xe1\xff\xff") is None
 
+
+@pytest.mark.asyncio
+async def test_call_turned_private_mid_game_stops_counting_for_the_server(call, monkeypatch):
+    got: list[tuple[str, int | None, int]] = []
+
+    async def fake_reward(kind, server_id, uid, n=1):
+        got.append((kind, server_id, uid))
+
+    still_open = {"v": True}
+
+    async def is_open(_cid):
+        return still_open["v"]
+
+    monkeypatch.setattr(mg, "_reward", fake_reward)
+    monkeypatch.setattr(mg, "channel_open", is_open)
+    g = mg.Forca(9, 1, [1, 2], 77)
+    await g.give("win", 2)
+    still_open["v"] = False  # um admin pôs cargo na visão da call durante a partida
+    g.stage += 1
+    await g.give("win", 2)
+    assert got == [("win", 77, 2), ("win", None, 2)]
+
+
+@pytest.mark.asyncio
+async def test_photo_game_limit_holds_when_many_start_at_once(call, monkeypatch):
+    import asyncio
+
+    h, _ = call
+    for i in range(mg.MAX_PHOTO_GAMES + 3):
+        cid = 100 + i
+        for uid in (1000 + 2 * i, 1001 + 2 * i):
+            h.voice.setdefault(cid, {})[uid] = {"stream": False}
+            h.user_voice[uid] = cid
+
+    async def slow_server(_cid):
+        await asyncio.sleep(0.01)  # o banco demora: sem trava, todo mundo passaria pela conferência
+        return None
+
+    async def no_prepare(_g):
+        return None
+
+    monkeypatch.setattr(mg, "server_of", slow_server)
+    monkeypatch.setattr(mg, "_prepare", no_prepare)
+    starts = [
+        mg.start_game(str(100 + i), mg.StartIn(kind="mundo"), Auth(1000 + 2 * i, 1))
+        for i in range(mg.MAX_PHOTO_GAMES + 3)
+    ]
+    res = await asyncio.gather(*starts, return_exceptions=True)
+    refused = [r for r in res if isinstance(r, HTTPException) and r.status_code == 503]
+    assert sum(isinstance(x, mg.Mundo) for x in mg.games.values()) == mg.MAX_PHOTO_GAMES
+    assert len(refused) == 3
+
+
+def test_changing_channel_permissions_forgets_the_cache(monkeypatch):
+    monkeypatch.setattr(cq, "_server_of_channel", {9: (77, True, 0.0), 10: (77, True, 0.0), 11: (88, True, 0.0)})
+    cq.forget_channels(cid=9)
+    assert set(cq._server_of_channel) == {10, 11}
+    cq.forget_channels(server_id=77)
+    assert set(cq._server_of_channel) == {11}
