@@ -4,6 +4,7 @@ import { type ChangeItem, type Demo, type Release, type Scene, type Tag, TAG_LAB
 /* Peças da página /novidades e do aviso "O que mudou": sem hooks, servem no servidor e no cliente. */
 
 const SCENES: Record<Scene, { bg: string; floaters: string[] }> = {
+  cuidado: { bg: "linear-gradient(125deg, #1abc9c, #00a8fc 50%, #5865f2)", floaters: ["🛡️", "😂", "✅", "📼", "🔒", "✨"] },
   jogos: { bg: "linear-gradient(125deg, #5865f2, #eb459e 45%, #f0b232)", floaters: ["🎮", "🕵️", "🌍", "🎵", "😂", "🟩"] },
   conquistas: { bg: "linear-gradient(125deg, #f0b232, #eb459e 50%, #9b59b6)", floaters: ["🏆", "⭐", "👑", "💎", "✨"] },
   servidor: { bg: "linear-gradient(125deg, #00a8fc, #5865f2 50%, #9b59b6)", floaters: ["🖥️", "⚡", "📡", "🪟", "4K"] },
@@ -21,7 +22,7 @@ const SPOTS: { left: number; top: number; r: number; d: number; s: number; low?:
   { left: 90, top: 10, r: -12, d: 2.2, s: 38, corner: true },
   { left: 68, top: 70, r: 6, d: 0.6, s: 34, low: true },
   { left: 84, top: 78, r: -6, d: 1.7, s: 40 },
-  { left: 48, top: 60, r: 12, d: 2.8, s: 30, low: true },
+  { left: 72, top: 6, r: 12, d: 2.8, s: 30 },
 ];
 
 export function Banner({ release, size = "lg" }: { release: Release; size?: "lg" | "md" }) {

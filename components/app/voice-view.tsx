@@ -57,6 +57,7 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
   const v = useVoice();
   const here = v.channelId === channel.id;
   const inside = useStore((s) => s.voice[channel.id]) ?? [];
+  const discordHere = useStore((s) => (s.discordVoice[channel.id]?.length ?? 0) > 0);
   const livekit = useStore((s) => s.livekit);
   const chatOpen = useUI((s) => s.callChat);
   const focus = useUI((s) => s.focus);
@@ -80,7 +81,7 @@ export function VoiceView({ channel, server }: { channel: Channel; server: Serve
         <Volume2 className="hidden size-5 text-oat/40 md:block" />
         <h1 className="font-semibold">{channel.name}</h1>
         {here && <span className="live-dot ml-1 !bg-moss" />}
-        {here && inside.length >= 2 && inside.every((m) => m.laugh) && (
+        {here && inside.length >= 2 && inside.every((m) => m.laugh) && !discordHere && (
           <span
             className="ml-1 hidden items-center gap-1 rounded-full bg-honey/15 px-2 py-0.5 text-[12px] font-semibold text-honey sm:inline-flex"
             title="Todo mundo aqui aceitou o clipe de risada: quando a call cair na gargalhada, o momento vira clipe no chat. Desligue em Configurações › Voz e vídeo."

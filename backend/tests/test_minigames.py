@@ -273,6 +273,18 @@ async def test_laugh_clip_needs_everyone_in_the_call_to_agree(call):
 
 
 @pytest.mark.asyncio
+async def test_laugh_clip_is_off_with_someone_from_the_discord_bridge(call, monkeypatch):
+    from app.routes import discord as dc
+
+    h, sent = call
+    # quem está na call pelo Discord não tem como aceitar o clipe
+    monkeypatch.setattr(dc, "discord_voice_snapshot", lambda ids: {"9": [{"id": "x"}]})
+    await mg.laugh(mg.LaughIn(channel_id="9", can_clip=True), Auth(2, 1))
+    r = await mg.laugh(mg.LaughIn(channel_id="9", can_clip=True), Auth(3, 1))
+    assert r.get("off") and not [s for s in sent if s[1] in ("risada", "risada_clip")]
+
+
+@pytest.mark.asyncio
 async def test_reward_counts_once_per_phase(call, monkeypatch):
     got: list[tuple[str, int | None, int]] = []
 

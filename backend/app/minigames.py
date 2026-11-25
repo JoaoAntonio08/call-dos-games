@@ -1079,7 +1079,17 @@ _pruned: dict[str, float] = {"music": -1e9}
 def laugh_allowed(cid: int) -> bool:
     """Clipe de risada só quando TODO MUNDO na call ligou a opção (quem não quer, desliga para a call)."""
     members = hub.voice.get(cid, {})
-    return len(members) >= 2 and all(bool(st.get("laugh")) for st in members.values())
+    if len(members) < 2 or not all(bool(st.get("laugh")) for st in members.values()):
+        return False
+    # quem entra pela ponte do Discord não tem como aceitar: com gente de lá na call, não clipa
+    try:
+        from .routes.discord import discord_voice_snapshot  # noqa: PLC0415
+
+        if discord_voice_snapshot([cid]).get(sid(cid)):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 class LaughIn(BaseModel):

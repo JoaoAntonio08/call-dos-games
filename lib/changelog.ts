@@ -6,7 +6,7 @@
  * animaçãozinha no item; `media` aceita print ou GIF de verdade (arquivo em /public/novidades/).
  */
 
-export type Scene = "jogos" | "conquistas" | "servidor" | "radio" | "ponte" | "desktop";
+export type Scene = "cuidado" | "jogos" | "conquistas" | "servidor" | "radio" | "ponte" | "desktop";
 export type Tag = "novo" | "melhorou" | "corrigido";
 export type Demo = "impostor" | "forca" | "quina" | "mapa" | "musica" | "risada" | "recado" | "retro" | "placa" | "qualidade" | "eq";
 
@@ -31,6 +31,48 @@ export interface Release {
 export const TAG_LABEL: Record<Tag, string> = { novo: "Novidades", melhorou: "Melhorias", corrigido: "Correções" };
 
 export const RELEASES: Release[] = [
+  {
+    version: "2.5.1",
+    date: "2026-11-25",
+    title: "Mais cuidado com a call",
+    summary: "O clipe de risada agora só acontece com o OK de todo mundo, a retrospectiva deixa as calls fechadas de fora e os jogos e recados ficaram mais firmes. E chegou esta página de novidades!",
+    scene: "cuidado",
+    groups: [
+      {
+        tag: "novo",
+        items: [
+          {
+            emoji: "✨",
+            title: "Página de novidades",
+            text: "Tudo que muda no Call dos Games, com banner e animação, e um aviso de O que mudou quando sai versão nova. Para rever depois: Configurações › Novidades.",
+          },
+        ],
+      },
+      {
+        tag: "melhorou",
+        items: [
+          {
+            emoji: "😂",
+            title: "Clipe de risada só com o OK de todo mundo",
+            text: "Agora vem desligado. Ligue em Configurações › Voz e vídeo. O clipe só acontece quando todo mundo na call aceitou: se alguém não quiser, ninguém clipa. Quando está valendo, aparece 😂 Clipe de risada ligado no topo da call, e todo mundo é avisado quando um momento vira clipe.",
+            demo: "risada",
+          },
+          {
+            emoji: "📅",
+            title: "Retrospectiva sem as calls fechadas",
+            text: "O tempo em calls que só alguns cargos enxergam não entra mais nos rankings do servidor, e o Adivinhe a música não usa músicas que tocaram nelas.",
+          },
+        ],
+      },
+      {
+        tag: "corrigido",
+        items: [
+          { emoji: "📼", title: "Recados", text: "O tempo do recado é conferido no próprio áudio, o limite de recados por call não estoura e áudio apagado sai de verdade do servidor." },
+          { emoji: "🎮", title: "Minigames", text: "Jogadas ao mesmo tempo não contam ponto em dobro, e trocar ou encerrar um jogo para tudo que ele estava preparando." },
+        ],
+      },
+    ],
+  },
   {
     version: "2.5.0",
     date: "2026-11-24",

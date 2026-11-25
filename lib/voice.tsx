@@ -851,7 +851,8 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   // só liga quando todo mundo da call aceitou (o servidor confere de novo antes de clipar)
   const laughAll = useStore((s) => {
     const members = channelId ? s.voice[channelId] : undefined;
-    return !!members && members.length >= 2 && members.every((m) => m.laugh);
+    const fromDiscord = channelId ? (s.discordVoice[channelId]?.length ?? 0) : 0;
+    return !!members && members.length >= 2 && members.every((m) => m.laugh) && fromDiscord === 0;
   });
   const laughOn = !!channelId && prefs.laughOk && laughAll && call.peers.length >= 2;
   const laughTimer = useRef<number | null>(null);
@@ -879,8 +880,9 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       // espera a risada terminar para ela caber no clipe; antes de salvar, confere tudo de novo
       laughTimer.current = window.setTimeout(() => {
         laughTimer.current = null;
-        const members = useStore.getState().voice[cid] ?? [];
-        const stillOk = prefsRef.current.laughOk && members.length >= 2 && members.every((m) => m.laugh);
+        const st = useStore.getState();
+        const members = st.voice[cid] ?? [];
+        const stillOk = prefsRef.current.laughOk && members.length >= 2 && members.every((m) => m.laugh) && !(st.discordVoice[cid]?.length ?? 0);
         if (stillOk) void saveClip("😂 Momento de risada");
       }, 3500);
     };
