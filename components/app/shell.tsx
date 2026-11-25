@@ -26,6 +26,7 @@ import { NoiteAlert, NoitesView } from "./noites";
 import { RetroView } from "./retro";
 import { GameReporter } from "./jogo-app";
 import { Modals } from "./modals";
+import { WhatsNew } from "./whats-new";
 
 export function Shell() {
   const route = useRoute();
@@ -173,6 +174,7 @@ export function Shell() {
       <ContextMenuHost />
       <GameReporter />
       <Modals />
+      <WhatsNew />
       {toastMsg && (
         <div key={toastMsg.id} role="status" className="slide-in glass-float toast-glass fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">
           {toastMsg.text}
