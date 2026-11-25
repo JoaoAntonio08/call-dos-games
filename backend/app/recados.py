@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Form, UploadFile
 
-from .audio_len import audio_seconds
+from .audio_len import audio_seconds, decoded_seconds
 from .core import Auth, CurrentUser, err, fetch_user, file_url, new_id, parse_id, pool, settings, sid, user_out
 from .perms import member as perms_member
 from .realtime import can_access_channel, hub
@@ -28,6 +28,7 @@ PER_AUTHOR = 3
 PER_CHANNEL = 20
 KEEP_DAYS = 7
 TOLERANCE = 1.0  # o gravador para um pouquinho depois dos 30 s
+DECODE_SLOTS = asyncio.Semaphore(2)  # decodificar usa CPU: poucos ao mesmo tempo, fora do laço principal
 RECADO_TYPES = {".webm", ".m4a", ".ogg", ".opus"}  # o que o MediaRecorder grava
 
 
@@ -114,6 +115,13 @@ async def create_recado(channel_id: str, file: UploadFile, seconds: int = Form(0
     data = await file.read(LIMITS["recado"] + 1)
     await file.seek(0)
     real = audio_seconds(data[: LIMITS["recado"]]) if len(data) <= LIMITS["recado"] else None
+    if real is None:
+        raise err(400, "Não deu para ler esse áudio. Grave de novo pelo botão do recado.")
+    if real > MAX_SECONDS + TOLERANCE:
+        raise err(400, f"O recado precisa ter até {MAX_SECONDS} segundos.")
+    # o cabeçalho passou na peneira; agora vale o que o áudio decodificado diz
+    async with DECODE_SLOTS:
+        real = await asyncio.to_thread(decoded_seconds, data, MAX_SECONDS + TOLERANCE + 5)
     if real is None:
         raise err(400, "Não deu para ler esse áudio. Grave de novo pelo botão do recado.")
     if real > MAX_SECONDS + TOLERANCE:

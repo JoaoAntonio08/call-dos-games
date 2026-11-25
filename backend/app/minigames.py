@@ -45,6 +45,8 @@ PHOTO_MAX = 4 * 1024 * 1024
 # memória: cada partida de fotos guarda até 10 fotos de 4 MB; e no máximo 2 preparações ao mesmo tempo
 MAX_PHOTO_GAMES = 4
 PREP_SLOTS = asyncio.Semaphore(2)
+# criar partida é uma coisa de cada vez: o limite de partidas com fotos e a troca de jogo não correm em paralelo
+START_LOCK = asyncio.Lock()
 
 
 def norm(s: str) -> str:
@@ -74,8 +76,11 @@ async def server_of(cid: int) -> int | None:
 
 
 async def channel_open(cid: int) -> bool:
-    """Call sem cargo na visão (aberta a todo o servidor)."""
-    return bool(await pool().fetchval("SELECT cardinality(view_roles) = 0 FROM channels WHERE id = $1", cid))
+    """Call sem cargo na visão (aberta a todo o servidor). Usa o mesmo cache da retrospectiva, que é
+    esquecido na hora em que alguém muda a permissão do canal."""
+    from . import conquistas  # noqa: PLC0415
+
+    return await conquistas._public_server_of(cid) is not None
 
 
 async def can_moderate(cid: int, uid: int) -> bool:
@@ -167,6 +172,12 @@ class Game:
         if key in self.rewarded:
             return
         self.rewarded.add(key)
+        # a call pode ter virado privada no meio do jogo: confere de novo antes de contar para o servidor
+        if self.public:
+            try:
+                self.public = await channel_open(self.cid)
+            except Exception:  # noqa: BLE001
+                self.public = False
         await _reward(kind, self.server_id if self.public else None, uid)
 
     def view(self, uid: int) -> dict[str, Any]:
@@ -947,6 +958,19 @@ async def start_game(channel_id: str, body: StartIn, me: Auth = CurrentUser) -> 
     _must_be_in_call(me, cid)
     if body.kind not in CLASSES:
         raise err(400, "Jogo desconhecido.")
+    async with START_LOCK:
+        g = await _create_game(cid, body, me)
+    if isinstance(g, (Musica, Mundo)):
+        g.phase = "loading"
+        await push(g)
+        g.prep = asyncio.create_task(_prepare(g))
+    else:
+        await push(g)
+    return {"ok": True}
+
+
+async def _create_game(cid: int, body: "StartIn", me: Auth) -> Game:
+    """Confere tudo e ocupa a vaga numa tacada só (roda sob START_LOCK)."""
     cur = games.get(cid)
     if cur and cur.phase != "end" and me.id != cur.host and in_call(cur.host, cid) and not await can_moderate(cid, me.id):
         raise err(409, "Já tem um jogo rolando. Quem começou (ou quem modera a call) pode encerrar.")
@@ -968,11 +992,7 @@ async def start_game(channel_id: str, body: StartIn, me: Auth = CurrentUser) -> 
     games[cid] = g
     if isinstance(g, (Musica, Mundo)):
         g.phase = "loading"
-        await push(g)
-        g.prep = asyncio.create_task(_prepare(g))
-    else:
-        await push(g)
-    return {"ok": True}
+    return g
 
 
 async def _prepare(g: "Musica | Mundo") -> None:

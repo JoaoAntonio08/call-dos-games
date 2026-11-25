@@ -291,6 +291,13 @@ async def _public_server_of(cid: int) -> int | None:
     return hit[0] if hit[1] else None
 
 
+def forget_channels(*, cid: int | None = None, server_id: int | None = None) -> None:
+    """Permissão de canal mudou (ou canal/cargo saiu): a próxima conta relê do banco, sem esperar o cache vencer."""
+    for c, hit in list(_server_of_channel.items()):
+        if c == cid or (server_id is not None and hit[0] == server_id):
+            _server_of_channel.pop(c, None)
+
+
 async def add_month(seconds: float) -> None:
     """Os mesmos minutos, separados por servidor e mês: base da retrospectiva (só calls abertas a todos)."""
     month = month_of()

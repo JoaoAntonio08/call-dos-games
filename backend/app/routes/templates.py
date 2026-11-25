@@ -10,6 +10,7 @@ import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from ..conquistas import forget_channels
 from ..core import Auth, CurrentUser, err, new_id, parse_id, pool
 from .servers import announce_server, clean_channel_name, require_admin
 
@@ -158,6 +159,7 @@ async def import_template(server_id: str, body: ImportIn, me: Auth = CurrentUser
                     if await conn.fetchval(f"SELECT 1 FROM {table} WHERE {field} = ANY($1::bigint[]) LIMIT 1", ids):
                         raise err(409, "Há canais com mensagens, eventos ou vínculos. Preserve os dados antes de substituir.")
                 await conn.execute("DELETE FROM channels WHERE server_id = $1", server)
+                forget_channels(server_id=server)
                 existing = []
             names = {(r["type"], r["name"]) for r in existing}
             position = max((r["position"] for r in existing), default=-1) + 1

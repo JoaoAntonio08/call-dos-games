@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from ..core import (
     USER_COLUMNS, USER_JOINS, Auth, CurrentUser, err, file_url, media, new_id, parse_id, pool, sid, user_out,
 )
+from ..conquistas import forget_channels
 from ..files import save_upload
 from ..perms import PERMS, RANK
 from ..realtime import hub
@@ -431,6 +432,7 @@ async def delete_role(role_id: str, me: Auth = CurrentUser) -> dict:
             "UPDATE channels SET view_roles = array_remove(view_roles, $1), send_roles = array_remove(send_roles, $1) WHERE server_id = $2",
             row["id"], row["server_id"],
         )
+    forget_channels(server_id=row["server_id"])
     await announce_server(row["server_id"])
     return {"ok": True}
 
@@ -519,6 +521,7 @@ async def update_channel(channel_id: str, body: ChannelPatch, me: Auth = Current
         await pool().execute("UPDATE channels SET position = $1 WHERE id = $2", body.position, cid)
     if body.view_roles is not None:
         await pool().execute("UPDATE channels SET view_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.view_roles), cid)
+        forget_channels(cid=cid)
     if body.send_roles is not None:
         await pool().execute("UPDATE channels SET send_roles = $1 WHERE id = $2", await _role_ids(ch["server_id"], body.send_roles), cid)
     if body.user_limit is not None and ch["type"] == "voice":
@@ -546,6 +549,7 @@ async def delete_channel(channel_id: str, me: Auth = CurrentUser) -> dict:
         # DeleteRoom também remove participantes que nunca anunciaram estado no gateway.
         await livekit("DeleteRoom", room_name(cid), {})
     await pool().execute("DELETE FROM channels WHERE id = $1", cid)
+    forget_channels(cid=cid)
     await announce_server(ch["server_id"])
     return {"ok": True}
 

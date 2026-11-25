@@ -7,10 +7,14 @@ Cobre o que os navegadores gravam com o MediaRecorder:
 - Ogg/Opus: posição do último pedaço.
 
 Devolve None quando não dá para ter certeza: quem chama deve recusar o arquivo.
+
+Isto é só a primeira peneira (rápida, sem decodificar). A palavra final é de `decoded_seconds`, que
+decodifica o áudio de verdade com o FFmpeg (PyAV) e soma as amostras que saíram.
 """
 
 from __future__ import annotations
 
+import io
 import struct
 
 MAX_STEPS = 200_000  # o arquivo é pequeno (até 1 MB); isto só evita laço sem fim em arquivo malformado
@@ -170,3 +174,45 @@ def _ogg(data: bytes) -> float | None:
         return None
     granule = struct.unpack("<q", data[last + 6 : last + 14])[0]
     return granule / 48000 if granule > 0 else None
+
+
+# ------------------------------------------------------------------ decodificação de verdade
+# só o que o MediaRecorder dos navegadores grava (nomes como o FFmpeg chama)
+DECODE_FORMATS = {"matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2", "ogg"}
+DECODE_CODECS = {"opus", "aac", "vorbis"}
+
+
+def decoded_seconds(data: bytes, stop_after: float = 60.0) -> float | None:
+    """Duração das amostras que o FFmpeg conseguiu decodificar, ou None se o áudio não decodifica.
+
+    Recusa: formato/codec fora do que o app grava, mais de uma faixa de áudio, vídeo junto, erro de
+    decodificação no meio do arquivo e áudio sem nenhuma amostra. Para de decodificar ao passar de
+    `stop_after` segundos (quem chama já recusa antes disso).
+    """
+    import av  # noqa: PLC0415
+
+    try:
+        with av.open(io.BytesIO(data), mode="r") as box:
+            if box.format.name not in DECODE_FORMATS:
+                return None
+            audio = [s for s in box.streams if s.type == "audio"]
+            if len(audio) != 1 or len(box.streams) != 1:
+                return None
+            stream = audio[0]
+            if stream.codec_context.name not in DECODE_CODECS:
+                return None
+            samples = 0
+            rate = 0
+            for frame in box.decode(stream):
+                if not frame.sample_rate:
+                    return None
+                rate = frame.sample_rate
+                samples += frame.samples
+                if samples / rate > stop_after:
+                    break
+    except Exception:  # noqa: BLE001 (qualquer erro do FFmpeg = arquivo recusado)
+        return None
+    if not rate or samples <= 0:
+        return None
+    return samples / rate
+
