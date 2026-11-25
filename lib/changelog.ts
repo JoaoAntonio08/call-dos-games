@@ -32,6 +32,27 @@ export const TAG_LABEL: Record<Tag, string> = { novo: "Novidades", melhorou: "Me
 
 export const RELEASES: Release[] = [
   {
+    version: "2.5.2",
+    date: "2026-11-25",
+    title: "Ajustes finos",
+    summary: "Mudou a permissão de uma call? A retrospectiva respeita na hora. Os recados passam por uma conferência mais rigorosa e o Onde foi isso? aguenta melhor muita gente começando ao mesmo tempo.",
+    scene: "cuidado",
+    groups: [
+      {
+        tag: "corrigido",
+        items: [
+          {
+            emoji: "🔒",
+            title: "Permissões valem na hora",
+            text: "Quando uma call vira restrita, ela sai da retrospectiva do servidor no mesmo instante, até no meio de um minigame.",
+          },
+          { emoji: "📼", title: "Recados conferidos de verdade", text: "O servidor toca o áudio do recado por dentro para medir o tempo, e recusa arquivo estragado ou que não veio do app." },
+          { emoji: "🗺️", title: "Onde foi isso?", text: "Muitas partidas começando juntas não passam mais do limite do servidor." },
+        ],
+      },
+    ],
+  },
+  {
     version: "2.5.1",
     date: "2026-11-25",
     title: "Mais cuidado com a call",
