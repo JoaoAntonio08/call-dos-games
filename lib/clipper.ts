@@ -59,8 +59,23 @@ export interface ClipResult {
   kind: "video" | "audio";
 }
 
-export function useClipper({ enabled, video, audio, extraAudio = [] }: { enabled: boolean; video?: MediaStreamTrack; audio: Track[]; extraAudio?: MediaStreamTrack[] }) {
+export function useClipper({
+  enabled,
+  video,
+  audio,
+  extraAudio = [],
+  resetKey = "",
+}: {
+  enabled: boolean;
+  video?: MediaStreamTrack;
+  audio: Track[];
+  extraAudio?: MediaStreamTrack[];
+  /** quando muda (entrou/saiu gente, alguém mudou o consentimento), o que estava gravado é jogado fora */
+  resetKey?: string;
+}) {
   const [ready, setReady] = useState(false);
+  // qual buffer está rodando: muda a cada recomeço, para quem pediu o clipe saber se ainda é o mesmo
+  const bufferRef = useRef<{ epoch: number; key: string | null }>({ epoch: 0, key: null });
   const [busy, setBusy] = useState(false);
   const ctxRef = useRef<AudioContext | null>(null);
   const destRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -158,6 +173,7 @@ export function useClipper({ enabled, video, audio, extraAudio = [] }: { enabled
 
     const slots: Slot[] = [0, 1].map(() => ({ rec: null, chunks: [], startedAt: 0, timer: 0, take: null }));
     slotsRef.current = slots;
+    bufferRef.current = { epoch: bufferRef.current.epoch + 1, key: resetKey };
     start(slots[0]);
     const offset = window.setTimeout(() => start(slots[1]), WINDOW_MS / 2);
     setReady(true);
@@ -174,10 +190,12 @@ export function useClipper({ enabled, video, audio, extraAudio = [] }: { enabled
           s.rec.stop();
         }
       }
+      // o que foi gravado aqui não sai mais em clipe nenhum
       slotsRef.current = [];
+      bufferRef.current = { epoch: bufferRef.current.epoch + 1, key: null };
       setReady(false);
     };
-  }, [enabled, videoTrack, format]);
+  }, [enabled, videoTrack, format, resetKey]);
 
   // sai da call / desliga: fecha o mixer
   useEffect(() => {
@@ -204,5 +222,8 @@ export function useClipper({ enabled, video, audio, extraAudio = [] }: { enabled
     return blob && blob.size > 0 ? { blob, ext: fmt.ext, seconds, kind } : null;
   }, [format, kind]);
 
-  return { supported: !!format, ready, busy, clip, kind };
+  /** o buffer que está gravando agora: `key` é o resetKey com que ele começou (null se parado) */
+  const buffer = useCallback(() => ({ ...bufferRef.current }), []);
+
+  return { supported: !!format, ready, busy, clip, kind, buffer };
 }
