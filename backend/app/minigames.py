@@ -39,7 +39,8 @@ KINDS = ("impostor", "forca", "quina", "musica", "mundo")
 games: dict[int, "Game"] = {}
 _last_act: dict[int, float] = {}
 COMMONS = os.environ.get("COMMONS_BASE", "https://commons.wikimedia.org").rstrip("/")
-UPLOADS = "https://upload.wikimedia.org/"
+# o Commons entrega as miniaturas por thumb.wikimedia.org (antes, upload.wikimedia.org)
+UPLOADS = ("https://upload.wikimedia.org/", "https://thumb.wikimedia.org/")
 USER_AGENT = "CallDosGames/2.5 (jogo entre amigos)"
 PHOTO_MAX = 4 * 1024 * 1024
 # memória: cada partida de fotos guarda até 10 fotos de 4 MB; e no máximo 2 preparações ao mesmo tempo
@@ -727,7 +728,7 @@ def pick_photo(data: dict[str, Any], want_year: bool, used: set[str]) -> dict[st
         info = (p.get("imageinfo") or [{}])[0]
         coords = (p.get("coordinates") or [{}])[0]
         meta = info.get("extmetadata") or {}
-        url = str(info.get("thumburl") or "")
+        url = str(info.get("thumburl") or "").split("?", 1)[0]  # sem os utm_* que o Commons pendura
         if title in used or _SKIP.search(title) or info.get("mime") != "image/jpeg":
             continue
         if not url.startswith(UPLOADS) or int(info.get("width") or 0) < 900:

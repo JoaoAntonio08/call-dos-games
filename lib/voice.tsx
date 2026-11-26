@@ -147,6 +147,8 @@ interface VoiceCtx {
   addStroke: (s: Stroke) => void;
   /** apaga esses traços (os seus; quem lidera a call apaga de qualquer um) */
   eraseStrokes: (ids: string[]) => void;
+  /** borracha: apaga só o que fica debaixo do caminho (x0,y0,x1,y1) */
+  rubBoard: (path: number[], r: number) => void;
   /** "mine" tira só os seus traços; "all" (só quem lidera) limpa a lousa toda */
   clearBoard: (scope: "mine" | "all") => void;
   /** você lidera esta call: dono, admin ou cargo com "Moderar call" */
@@ -581,7 +583,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       } else if (topic === "react" && typeof msg.emoji === "string") {
         pushReaction(msg.emoji.slice(0, 16), name);
       } else if (topic === "board") {
-        if (p && (msg.type === "stroke" || msg.type === "erase" || msg.type === "clear")) {
+        if (p && (msg.type === "stroke" || msg.type === "erase" || msg.type === "rub" || msg.type === "clear")) {
           // quem recebe confere: apagar o dos outros só vale se quem mandou lidera a call
           const leads = leadsBoard(serverOfRoom(room.name), p.identity);
           setStrokes((s) => applyBoardMsg(s, msg as unknown as BoardMsg, p.identity, leads));
@@ -635,6 +637,16 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       if (!ids.length) return;
       setStrokes((cur) => applyBoardMsg(cur, { type: "erase", ids }, myId, boardLeader));
       publish("board", { type: "erase", ids });
+    },
+    [publish, myId, boardLeader],
+  );
+  const rubBoard = useCallback(
+    (path: number[], r: number) => {
+      const msg: BoardMsg = { type: "rub", path: path.map((n) => Math.round(n * 10000) / 10000), r };
+      // só manda se passou por cima de algo; cada um repete o mesmo corte no seu quadro
+      if (applyBoardMsg(strokesRef.current, msg, myId, boardLeader) === strokesRef.current) return;
+      setStrokes((cur) => applyBoardMsg(cur, msg, myId, boardLeader));
+      publish("board", msg);
     },
     [publish, myId, boardLeader],
   );
@@ -970,6 +982,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       react,
       addStroke,
       eraseStrokes,
+      rubBoard,
       clearBoard,
       boardLeader,
       myId,
@@ -979,7 +992,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       isDj,
       clip,
     }),
-    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, eraseStrokes, clearBoard, boardLeader, myId, startSpin, queue, playQueued, isDj, clip, noShare],
+    [call, yt, channelId, joining, deaf, prefs, pttDown, voiceVol, screenVol, localMute, setLocalMute, serverMute, serverDeaf, strokes, spin, reactions, join, leave, setDeaf, setPrefs, setVoiceVol, setScreenVol, playSound, react, addStroke, eraseStrokes, rubBoard, clearBoard, boardLeader, myId, startSpin, queue, playQueued, isDj, clip, noShare],
   );
 
   return (

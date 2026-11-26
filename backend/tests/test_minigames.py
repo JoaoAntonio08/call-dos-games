@@ -212,6 +212,14 @@ def test_photo_only_from_wikimedia_uploads_and_with_year_when_needed():
     assert mg.pick_photo(_commons(title="File:Mapa do Rio.jpg"), False, set()) is None
 
 
+def test_photo_from_the_new_commons_thumbnail_host():
+    # desde 2026 o Commons entrega as miniaturas por thumb.wikimedia.org, com utm_* no fim
+    url = "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/14/Rua.JPG/1280px-Rua.JPG?utm_source=commons.wikimedia.org&utm_content=thumbnail"
+    p = mg.pick_photo(_commons(url=url), False, set())
+    assert p and p["url"] == "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/14/Rua.JPG/1280px-Rua.JPG"
+    assert mg.pick_photo(_commons(url="https://thumb.wikimedia.org.evil.example/x.jpg"), False, set()) is None
+
+
 def test_points():
     assert mg.place_points(0) == 5000 and mg.place_points(20000) < 50
     assert mg.year_points(0) == 5000 and mg.year_points(40) < 50
