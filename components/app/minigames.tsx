@@ -5,6 +5,8 @@ import { Check, Crown, Globe2, Grid3x3, Music2, Spline, Timer, VenetianMask } fr
 import { api, errorText } from "@/lib/api";
 import { nameInChannel, useStore } from "@/lib/store";
 import { toast } from "@/lib/ui";
+import { loadApi } from "@/components/room/youtube-stage";
+import { YT_STATE, type YTPlayer } from "@/lib/use-youtube-sync";
 
 /* ------------------------------------------------------------------ */
 /* Minigames da call. Quem decide tudo é o servidor: aqui só chega a    */
@@ -541,6 +543,82 @@ function QuinaView({ channelId, g, name }: { channelId: string; g: GameView; nam
 }
 
 /* ---------------- Adivinhe a música ---------------- */
+/**
+ * Toca o trecho pela IFrame API do YouTube (a mesma da música da call). O player fica invisível, mas com
+ * 200x200 dentro da tela, que é o mínimo que o YouTube aceita; o botão dá o play com um clique de verdade
+ * quando o navegador segura o som automático.
+ */
+function Snippet({ videoId, start }: { videoId: string; start: number }) {
+  const mount = useRef<HTMLDivElement>(null);
+  const player = useRef<YTPlayer | null>(null);
+  const [state, setState] = useState<"loading" | "blocked" | "playing" | "error">("loading");
+  useEffect(() => {
+    let dead = false;
+    const host = document.createElement("div");
+    mount.current?.appendChild(host);
+    loadApi()
+      .then((YT) => {
+        if (dead) return;
+        player.current = new YT.Player(host, {
+          videoId,
+          width: "200",
+          height: "200",
+          playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, playsinline: 1, iv_load_policy: 3, start, end: start + 30, origin: window.location.origin },
+          events: {
+            onReady: (e) => {
+              if (dead) return;
+              e.target.setVolume(90);
+              e.target.playVideo();
+              // se em 1,5 s não começou, o navegador segurou o som: mostra o botão
+              window.setTimeout(() => {
+                if (!dead && player.current?.getPlayerState() !== YT_STATE.PLAYING) setState((s) => (s === "loading" ? "blocked" : s));
+              }, 1500);
+            },
+            onStateChange: (e) => {
+              if (dead) return;
+              if (e.data === YT_STATE.PLAYING) setState("playing");
+            },
+            onError: () => !dead && setState("error"),
+          },
+        });
+      })
+      .catch(() => !dead && setState("error"));
+    return () => {
+      dead = true;
+      try {
+        player.current?.destroy();
+      } catch {
+        /* já foi */
+      }
+      player.current = null;
+      host.remove();
+    };
+  }, [videoId, start]);
+  return (
+    <>
+      <div ref={mount} aria-hidden className="pointer-events-none fixed bottom-0 left-0 -z-10 size-[200px] overflow-hidden opacity-0" />
+      {state === "playing" ? (
+        <p className="text-[48px]">🎧</p>
+      ) : state === "error" ? (
+        <p className="text-[14px] text-ember">Essa música não quis tocar aqui. Quem começou pode pular.</p>
+      ) : (
+        <button
+          type="button"
+          className={`${btn} bg-ember text-white`}
+          onClick={() => {
+            const p = player.current;
+            if (!p) return;
+            p.seekTo(start, true);
+            p.playVideo();
+          }}
+        >
+          {state === "loading" ? "Carregando a música…" : "▶ Tocar o trecho"}
+        </button>
+      )}
+    </>
+  );
+}
+
 function MusicaView({ channelId, g, name }: { channelId: string; g: GameView; name: (id: string) => string }) {
   const [text, setText] = useState("");
   const [miss, setMiss] = useState(false);
@@ -554,20 +632,9 @@ function MusicaView({ channelId, g, name }: { channelId: string; g: GameView; na
         Música {String(g.round)} de {String(g.rounds)}
       </p>
       {/* o trecho toca escondido: o título só aparece no fim da rodada */}
-      {g.phase === "play" && videoId && (
-        <iframe
-          key={`${videoId}-${String(g.round)}`}
-          title="trecho"
-          aria-hidden
-          tabIndex={-1}
-          allow="autoplay"
-          className="pointer-events-none absolute -left-[9999px] size-px opacity-0"
-          src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&start=${start}&end=${start + 30}`}
-        />
-      )}
+      {g.phase === "play" && videoId && <Snippet key={`${videoId}-${String(g.round)}`} videoId={videoId} start={start} />}
       {g.phase === "play" && (
         <>
-          <p className="text-[48px]">🎧</p>
           {g.you_got ? (
             <p className="font-display text-[20px] font-bold text-emerald-400">Você acertou! Espere os outros…</p>
           ) : (
@@ -598,7 +665,6 @@ function MusicaView({ channelId, g, name }: { channelId: string; g: GameView; na
               </button>
             </form>
           )}
-          <p className="text-[13px] text-oat/50">Sem som? Clique uma vez em qualquer lugar da página (o navegador segura o som automático).</p>
         </>
       )}
       {answer && (
@@ -780,9 +846,14 @@ function WorldMap({
       lib.current = leaflet;
       const m = leaflet.map(box.current, { worldCopyJump: true, minZoom: 1 }).setView([15, 0], 1);
       leaflet
-        .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        // mapa da CARTO (dados do OpenStreetMap): os servidores do próprio OpenStreetMap bloqueiam (403) apps
+        // que mandam pedido sem Referer, e o site inteiro usa no-referrer
+        .tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
           maxZoom: 18,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
+          subdomains: "abcd",
+          referrerPolicy: "strict-origin-when-cross-origin",
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a>',
         })
         .addTo(m);
       m.on("click", (e: import("leaflet").LeafletMouseEvent) => {

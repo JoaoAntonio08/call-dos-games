@@ -26,7 +26,8 @@ type YTNamespace = {
 };
 
 let apiPromise: Promise<YTNamespace> | null = null;
-function loadApi(): Promise<YTNamespace> {
+/** IFrame API oficial: o player que ela cria manda origem/Referer, que o YouTube exige no embutido */
+export function loadApi(): Promise<YTNamespace> {
   const w = window as unknown as { YT?: YTNamespace; onYouTubeIframeAPIReady?: () => void };
   if (w.YT?.Player) return Promise.resolve(w.YT);
   if (apiPromise) return apiPromise;

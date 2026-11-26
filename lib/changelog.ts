@@ -32,6 +32,32 @@ export const TAG_LABEL: Record<Tag, string> = { novo: "Novidades", melhorou: "Me
 
 export const RELEASES: Release[] = [
   {
+    version: "2.5.4",
+    date: "2026-11-26",
+    title: "Jogos de volta",
+    summary: "O Onde foi isso? e o Adivinhe a música voltaram a funcionar, e a borracha do quadro agora apaga só onde você passa.",
+    scene: "jogos",
+    groups: [
+      {
+        tag: "melhorou",
+        items: [
+          {
+            emoji: "🧽",
+            title: "Borracha de verdade no quadro",
+            text: "A borracha apaga só o pedaço que ela cobre, em vez de sumir com o traço inteiro.",
+          },
+        ],
+      },
+      {
+        tag: "corrigido",
+        items: [
+          { emoji: "🗺️", title: "Onde foi isso?", text: "As fotos voltaram a carregar e o mapa aparece de novo." },
+          { emoji: "🎵", title: "Adivinhe a música", text: "O trecho voltou a tocar. Se o navegador segurar o som, aparece um botão Tocar o trecho." },
+        ],
+      },
+    ],
+  },
+  {
     version: "2.5.3",
     date: "2026-11-26",
     title: "Privacidade em primeiro lugar",

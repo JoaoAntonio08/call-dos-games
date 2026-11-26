@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyBoardMsg, hitByEraser, leadsBoard, type Stroke } from "../lib/board.ts";
+import { applyBoardMsg, hitByEraser, leadsBoard, rubOut, type Stroke } from "../lib/board.ts";
 import type { Server } from "../lib/types.ts";
 
 const line = (id: string, by: string | undefined, y = 0.5): Stroke => ({ id, color: "#fff", size: 4, pts: [0.1, y, 0.9, y], by });
@@ -65,3 +65,41 @@ test("traço que chega fica com quem mandou, mesmo se vier com outro dono escrit
   assert.equal(got[0].by, "beto", "não dá para desenhar como a Ana");
   assert.deepEqual(applyBoardMsg(got, { type: "clear", scope: "mine" }, "ana", false).map((s) => s.id), ["f1"], "a Ana não apaga o traço do Beto");
 });
+
+test("borracha corta só o pedaço que passou por cima, e o resto do traço fica", () => {
+  const before = [line("b1", "beto", 0.5)]; // de 0.1 a 0.9 na altura 0.5
+  const after = rubOut(before, [0.5, 0.45, 0.5, 0.55], 0.02, "beto", false);
+  assert.equal(after.length, 2, "o traço vira dois pedaços");
+  assert.deepEqual(after.map((s) => s.id), ["b1~0", "b1~1"]);
+  assert.ok(after.every((s) => s.by === "beto" && s.color === "#fff"), "os pedaços continuam do mesmo dono e cor");
+  const left = after[0].pts, right = after[1].pts;
+  assert.ok(Math.abs(left[0] - 0.1) < 1e-9 && left[left.length - 2] < 0.48, "o pedaço da esquerda vai até perto da borracha");
+  assert.ok(right[0] > 0.52 && Math.abs(right[right.length - 2] - 0.9) < 1e-9, "o da direita começa depois dela");
+});
+
+test("borracha arrastada corta o caminho todo, sem pular pedaço", () => {
+  const after = rubOut([line("b1", "beto", 0.5)], [0.2, 0.5, 0.8, 0.5], 0.01, "beto", false);
+  // sobra só a pontinha de cada lado
+  assert.equal(after.length, 2);
+  assert.ok(after[0].pts.every((v, i) => i % 2 === 1 || v < 0.2));
+  assert.ok(after[1].pts.every((v, i) => i % 2 === 1 || v > 0.8));
+});
+
+test("borracha longe de tudo não muda nada; e não mexe no traço dos outros", () => {
+  const b = board();
+  assert.equal(rubOut(b, [0.5, 0.35, 0.5, 0.35], 0.02, "beto", false), b, "longe de tudo: o mesmo quadro");
+  assert.equal(rubOut(b, [0.5, 0.2, 0.5, 0.2], 0.02, "beto", false), b, "o traço da Ana não é dele");
+  const led = rubOut(b, [0.5, 0.2, 0.5, 0.2], 0.02, "lider", true);
+  assert.deepEqual(led.filter((s) => s.id.startsWith("a1")).map((s) => s.id), ["a1~0", "a1~1"], "quem lidera corta o de qualquer um");
+});
+
+test("todo mundo que recebe o mesmo corte chega no mesmo quadro (e mensagem estranha é ignorada)", () => {
+  const msg = { type: "rub" as const, path: [0.5, 0.5, 0.5, 0.5], r: 0.02 };
+  assert.deepEqual(applyBoardMsg(board(), msg, "beto", false), applyBoardMsg(board(), msg, "beto", false));
+  const b = board();
+  assert.equal(applyBoardMsg(b, { type: "rub", path: [Number.NaN, 0.5], r: 0.02 }, "beto", false), b);
+  assert.equal(applyBoardMsg(b, { type: "rub", path: [0.5, 0.5], r: 0 }, "beto", false), b);
+  const huge = applyBoardMsg(b, { type: "rub", path: [0.5, 0.5], r: 999 }, "lider", true);
+  assert.ok(huge.length > 0, "raio gigante é limitado: não vira um Limpar tudo disfarçado");
+});
+

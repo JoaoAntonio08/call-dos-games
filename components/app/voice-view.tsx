@@ -32,7 +32,6 @@ import {
 import { isUnread, nameInChannel, useNameInServer, useStore, useUser } from "@/lib/store";
 import { openModal, openUserMenu, toast, toggleUI, useUI } from "@/lib/ui";
 import { useVoice, type Spin, type Stroke } from "@/lib/voice";
-import { hitByEraser } from "@/lib/board";
 import { DEFAULT_SHARE, RESOLUTIONS, type Peer, type ShareSettings } from "@/lib/use-call";
 import type { CallProblem } from "@/lib/call-errors";
 import { loadJSON, saveJSON } from "@/lib/prefs";
@@ -783,12 +782,14 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
   const [size, setSize] = useState(4);
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
   const current = useRef<Stroke | null>(null);
-  const erasing = useRef(false);
+  // onde a borracha estava no último movimento: o corte vai de lá até aqui, sem pular pedaço
+  const erasing = useRef<number[] | null>(null);
   const ERASER = 0.022; // raio da borracha (fração da largura da lousa)
   const rub = (e: React.PointerEvent) => {
     const [x, y] = point(e);
-    const ids = hitByEraser(v.strokes, x, y, ERASER, v.myId, v.boardLeader);
-    if (ids.length) v.eraseStrokes(ids);
+    const from = erasing.current ?? [x, y];
+    erasing.current = [x, y];
+    v.rubBoard([from[0], from[1], x, y], ERASER);
   };
   const mine = v.strokes.some((s) => s.by === v.myId);
 
@@ -854,7 +855,7 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           if (tool === "eraser") {
-            erasing.current = true;
+            erasing.current = null;
             rub(e);
             return;
           }
@@ -873,7 +874,7 @@ function Whiteboard({ onClose }: { onClose: () => void }) {
           redraw();
         }}
         onPointerUp={() => {
-          erasing.current = false;
+          erasing.current = null;
           const s = current.current;
           current.current = null;
           if (s) v.addStroke(s);
