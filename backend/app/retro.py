@@ -110,24 +110,29 @@ async def retrospective(server_id: str, mes: str | None = None, me: Auth = Curre
     open_channels = [
         r["id"]
         for r in await pool().fetch(
-            "SELECT id FROM channels WHERE server_id = $1 AND type <> 'voice' AND cardinality(view_roles) = 0", srv
+            "SELECT id FROM channels WHERE server_id = $1 AND type = 'text' AND cardinality(view_roles) = 0", srv
         )
     ]
     voice = await _visible_voice(srv, me.id)
+    # só mensagem que todo mundo no canal aberto vê: resposta "só para você" e mensagem temporária ficam de fora
+    shown = "visible_to IS NULL AND expires_at IS NULL"
 
     talkers = await pool().fetch(
         """SELECT author_id, count(*) AS n FROM messages
            WHERE channel_id = ANY($1::bigint[]) AND created_at >= $2 AND created_at < $3 AND kind = 'default' AND author_id IS NOT NULL
+             AND """ + shown + """
            GROUP BY author_id ORDER BY n DESC LIMIT 5""",
         open_channels, start, end,
     )
     total_msgs = await pool().fetchval(
-        """SELECT count(*) FROM messages WHERE channel_id = ANY($1::bigint[]) AND created_at >= $2 AND created_at < $3 AND kind = 'default'""",
+        """SELECT count(*) FROM messages WHERE channel_id = ANY($1::bigint[]) AND created_at >= $2 AND created_at < $3 AND kind = 'default'
+             AND """ + shown,
         open_channels, start, end,
     )
     emojis = await pool().fetch(
         """SELECT r.emoji, count(*) AS n FROM reactions r JOIN messages m ON m.id = r.message_id
            WHERE m.channel_id = ANY($1::bigint[]) AND m.created_at >= $2 AND m.created_at < $3
+             AND m.visible_to IS NULL AND m.expires_at IS NULL
            GROUP BY r.emoji ORDER BY n DESC LIMIT 5""",
         open_channels, start, end,
     )
@@ -158,7 +163,8 @@ async def retrospective(server_id: str, mes: str | None = None, me: Auth = Curre
     people = await _people(ids)
     mine = next((r for r in stats if r["user_id"] == me.id), None)
     my_msgs = await pool().fetchval(
-        """SELECT count(*) FROM messages WHERE channel_id = ANY($1::bigint[]) AND created_at >= $2 AND created_at < $3 AND author_id = $4 AND kind = 'default'""",
+        """SELECT count(*) FROM messages WHERE channel_id = ANY($1::bigint[]) AND created_at >= $2 AND created_at < $3 AND author_id = $4 AND kind = 'default'
+             AND """ + shown,
         open_channels, start, end, me.id,
     )
 

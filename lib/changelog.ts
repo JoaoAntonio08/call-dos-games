@@ -32,6 +32,31 @@ export const TAG_LABEL: Record<Tag, string> = { novo: "Novidades", melhorou: "Me
 
 export const RELEASES: Release[] = [
   {
+    version: "2.5.3",
+    date: "2026-11-26",
+    title: "Privacidade em primeiro lugar",
+    summary: "A retrospectiva deixa de fora tudo que nem todo mundo vê, e o clipe de risada só usa o que foi gravado depois que todo mundo aceitou.",
+    scene: "cuidado",
+    groups: [
+      {
+        tag: "corrigido",
+        items: [
+          {
+            emoji: "📅",
+            title: "Retrospectiva sem mensagens privadas",
+            text: "Mensagens só para você, mensagens temporárias e canais fechados não contam mais no total, no ranking de quem mais falou nem no emoji do mês.",
+          },
+          {
+            emoji: "😂",
+            title: "Clipe de risada só com o que veio depois do OK",
+            text: "Quando alguém entra, sai ou muda de ideia sobre o clipe, o que estava guardado é jogado fora. O clipe de risada só usa o que foi gravado com a mesma turma e todo mundo de acordo.",
+            demo: "risada",
+          },
+        ],
+      },
+    ],
+  },
+  {
     version: "2.5.2",
     date: "2026-11-25",
     title: "Ajustes finos",

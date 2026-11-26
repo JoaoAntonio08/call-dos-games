@@ -784,13 +784,27 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const ownVideo = ownScreen?.getVideoTracks()[0];
   const useOwn = !sharer?.screen && !!ownVideo;
   const clipAudio: Track[] = channelId ? [sharer?.screenAudio, ...call.peers.map((p) => p.mic)].filter((t): t is Track => !!t) : [];
+  // quem está na call e quem aceitou o clipe de risada: se qualquer coisa muda, o buffer recomeça do zero
+  // (nada gravado antes de alguém entrar, sair ou mudar de ideia vai parar num clipe)
+  const consentKey = useStore((s) => {
+    if (!channelId) return "";
+    const here = (s.voice[channelId] ?? []).map((m) => `${m.user_id}:${m.laugh ? 1 : 0}`).sort().join(",");
+    const bridge = (s.discordVoice[channelId] ?? []).map((m) => m.id).sort().join(",");
+    return `${here}|${bridge}`;
+  });
+  const consentKeyRef = useRef(consentKey);
+  useEffect(() => {
+    consentKeyRef.current = consentKey;
+  }, [consentKey]);
   const clipper = useClipper({
+    resetKey: consentKey,
     enabled: !!channelId && prefs.clipBuffer,
     video: channelId ? (sharer?.screen?.mediaStreamTrack ?? (useOwn ? ownVideo : undefined)) : undefined,
     audio: clipAudio,
     extraAudio: useOwn ? ownScreen!.getAudioTracks() : [],
   });
   const clipperClip = clipper.clip;
+  const clipperBuffer = clipper.buffer;
   const sharerName = sharer ? (sharer.isLocal ? myName : nameInChannel(channelId, sharer.identity, sharer.name)) : useOwn ? myName : undefined;
   const saveClip = useCallback(async (label?: string) => {
     if (!channelId) return;
@@ -873,17 +887,24 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       // todo mundo fica sabendo que o momento vai virar clipe
       if (d.clip) toast("😂 A call caiu na risada: o momento vai virar clipe no chat.");
     };
+    const everyoneOk = (cid: string) => {
+      const st = useStore.getState();
+      const members = st.voice[cid] ?? [];
+      return prefsRef.current.laughOk && members.length >= 2 && members.every((m) => m.laugh) && !(st.discordVoice[cid]?.length ?? 0);
+    };
     const onClipIt = (e: Event) => {
       const cid = (e as CustomEvent<{ channel_id: string }>).detail?.channel_id;
       if (!cid || cid !== channelId) return;
       if (laughTimer.current) window.clearTimeout(laughTimer.current);
+      laughTimer.current = null;
+      // o buffer tem que ter começado com esta mesma turma, todo mundo de acordo: nada de antes do OK
+      const buf = clipperBuffer();
+      if (!everyoneOk(cid) || buf.key === null || buf.key !== consentKeyRef.current) return;
       // espera a risada terminar para ela caber no clipe; antes de salvar, confere tudo de novo
       laughTimer.current = window.setTimeout(() => {
         laughTimer.current = null;
-        const st = useStore.getState();
-        const members = st.voice[cid] ?? [];
-        const stillOk = prefsRef.current.laughOk && members.length >= 2 && members.every((m) => m.laugh) && !(st.discordVoice[cid]?.length ?? 0);
-        if (stillOk) void saveClip("😂 Momento de risada");
+        const now = clipperBuffer();
+        if (everyoneOk(cid) && now.epoch === buf.epoch && now.key === consentKeyRef.current) void saveClip("😂 Momento de risada");
       }, 3500);
     };
     window.addEventListener("cdg:risada", onRisada);
@@ -895,7 +916,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("cdg:risada", onRisada);
       window.removeEventListener("cdg:risada-clip", onClipIt);
     };
-  }, [channelId, pushReaction, saveClip]);
+  }, [channelId, pushReaction, saveClip, clipperBuffer]);
 
   // app de Windows: atalho global (Alt+Shift+C) clipa mesmo com o jogo na frente
   const clipNow = useRef<(() => void) | null>(null);
