@@ -165,3 +165,7 @@ backend/app/                    API: auth, usuários, servidores, mensagens, arq
 backend/app/schema.sql          tabelas (a API aplica sozinha ao subir)
 backend/deploy/                 Postgres, systemd, Caddy e LiveKit para o servidor
 ```
+
+## Licença
+
+Distribuído sob a licença MIT. Veja o arquivo [LICENSE](LICENSE).
