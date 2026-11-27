@@ -67,14 +67,44 @@ function toSegment(x: number, y: number, ax: number, ay: number, bx: number, by:
 
 const STEP = 0.003; // os traços são cortados nessa resolução (mesma distância mínima entre pontos ao desenhar)
 const MAX_RUB_RADIUS = 0.1;
+/** limites de tudo que chega pela rede: ninguém trava o quadro dos outros com traço ou borracha exagerados */
+export const LIMITS = {
+  points: 1200, // pares x,y por traço (o mesmo limite de quem desenha)
+  strokes: 3000, // traços no quadro
+  densify: 4000, // pontos (x,y) de um traço depois de adensado
+  rubBudget: 40_000, // pontos analisados por passada de borracha, somando todos os traços
+};
 
-/** Pontos do traço com no máximo STEP entre eles, para o corte não pular um pedaço. */
-function densify(p: number[]): number[] {
-  if (p.length < 4) return p.slice();
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+/** Traço que veio de outra pessoa, conferido: só números finitos entre 0 e 1, tamanho e cor normais. null = descarta. */
+export function cleanStroke(raw: unknown): Stroke | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.id !== "string" || !s.id || s.id.length > 512 || !Array.isArray(s.pts)) return null;
+  if (s.pts.length < 2 || s.pts.length % 2 !== 0 || s.pts.length > LIMITS.points * 2) return null;
+  const pts: number[] = [];
+  for (const v of s.pts) {
+    if (typeof v !== "number" || !Number.isFinite(v)) return null;
+    pts.push(clamp01(v));
+  }
+  const size = typeof s.size === "number" && Number.isFinite(s.size) ? Math.max(1, Math.min(40, s.size)) : 4;
+  const color = typeof s.color === "string" && /^#[0-9a-f]{3,8}$/i.test(s.color) ? s.color : "#ffffff";
+  return { id: s.id, color, size, pts };
+}
+
+/**
+ * Pontos do traço com no máximo STEP entre eles (para o corte não pular um pedaço). null se precisaria
+ * de mais de `cap` pontos: aí o traço fica inteiro (cortar uma versão pela metade sumiria com o resto).
+ */
+function densify(p: number[], cap: number): number[] | null {
+  if (p.length < 4) return p.slice(0, 2);
   const out = [p[0], p[1]];
-  for (let i = 2; i + 1 < p.length && out.length < 8000; i += 2) {
+  for (let i = 2; i + 1 < p.length; i += 2) {
     const ax = p[i - 2], ay = p[i - 1], bx = p[i], by = p[i + 1];
     const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / STEP));
+    // confere antes de gerar: nunca passa do limite, nem dentro de um segmento
+    if (out.length / 2 + n > cap) return null;
     for (let k = 1; k <= n; k++) out.push(Math.round((ax + ((bx - ax) * k) / n) * 10000) / 10000, Math.round((ay + ((by - ay) * k) / n) * 10000) / 10000);
   }
   return out;
@@ -89,18 +119,27 @@ export function rubOut(strokes: Stroke[], path: number[], radius: number, sender
   const r = Math.max(0, Math.min(MAX_RUB_RADIUS, Number(radius) || 0));
   const eraser = (Array.isArray(path) ? path.slice(0, 4) : []).map(Number);
   if (r === 0 || eraser.length < 2 || eraser.some((v) => !Number.isFinite(v))) return strokes;
-  const [ax, ay] = eraser;
-  const [bx, by] = eraser.length >= 4 ? [eraser[2], eraser[3]] : [ax, ay];
+  const [ax, ay] = eraser.map(clamp01);
+  const [bx, by] = eraser.length >= 4 ? [clamp01(eraser[2]), clamp01(eraser[3])] : [ax, ay];
+  // orçamento por passada: gasto na mesma ordem por todo mundo, então todos chegam no mesmo quadro
+  let budget = LIMITS.rubBudget;
   const under = (x: number, y: number, reach: number) => toSegment(x, y, ax, ay, bx, by) <= reach;
   let changed = false;
   const out: Stroke[] = [];
   for (const s of strokes) {
     const reach = r + s.size / 2000;
-    if (!canErase(s, sender, leads) || Math.min(distanceTo(s, ax, ay), distanceTo(s, bx, by), distanceTo(s, (ax + bx) / 2, (ay + by) / 2)) > reach + Math.hypot(bx - ax, by - ay) / 2) {
+    if (budget <= 0 || !canErase(s, sender, leads) || Math.min(distanceTo(s, ax, ay), distanceTo(s, bx, by), distanceTo(s, (ax + bx) / 2, (ay + by) / 2)) > reach + Math.hypot(bx - ax, by - ay) / 2) {
       out.push(s);
       continue;
     }
-    const pts = densify(s.pts);
+    const cap = Math.min(LIMITS.densify, budget);
+    const pts = densify(s.pts, cap);
+    // desconta o que custou (ou o teto, se passou dele): a conta é a mesma em todo mundo
+    budget -= pts ? pts.length / 2 : cap;
+    if (!pts) {
+      out.push(s);
+      continue;
+    }
     if (pts.length === 2) {
       // um ponto só: ou some inteiro ou fica
       if (under(pts[0], pts[1], reach)) changed = true;
@@ -134,8 +173,8 @@ export function rubOut(strokes: Stroke[], path: number[], radius: number, sender
  */
 export function applyBoardMsg(strokes: Stroke[], msg: BoardMsg, sender: string, senderLeads: boolean): Stroke[] {
   if (msg.type === "stroke") {
-    const s = msg.stroke;
-    if (!s || typeof s.id !== "string" || !Array.isArray(s.pts)) return strokes;
+    const s = cleanStroke(msg.stroke);
+    if (!s || strokes.length >= LIMITS.strokes) return strokes;
     // o dono é quem mandou de verdade, não o que veio escrito no traço (senão dava para desenhar "como" outra pessoa)
     return strokes.some((x) => x.id === s.id) ? strokes : [...strokes, { ...s, by: sender }];
   }
