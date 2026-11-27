@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyBoardMsg, hitByEraser, leadsBoard, rubOut, type Stroke } from "../lib/board.ts";
+import { LIMITS, applyBoardMsg, cleanStroke, hitByEraser, leadsBoard, rubOut, type Stroke } from "../lib/board.ts";
 import type { Server } from "../lib/types.ts";
 
 const line = (id: string, by: string | undefined, y = 0.5): Stroke => ({ id, color: "#fff", size: 4, pts: [0.1, y, 0.9, y], by });
@@ -101,5 +101,48 @@ test("todo mundo que recebe o mesmo corte chega no mesmo quadro (e mensagem estr
   assert.equal(applyBoardMsg(b, { type: "rub", path: [0.5, 0.5], r: 0 }, "beto", false), b);
   const huge = applyBoardMsg(b, { type: "rub", path: [0.5, 0.5], r: 999 }, "lider", true);
   assert.ok(huge.length > 0, "raio gigante é limitado: não vira um Limpar tudo disfarçado");
+});
+
+// ------------------------------------------------------------------ entradas extremas (ninguém trava o quadro dos outros)
+test("traço recebido com coordenada gigante, NaN ou tamanho absurdo é corrigido ou descartado", () => {
+  const huge = cleanStroke({ id: "x", color: "#fff", size: 4, pts: [0, 0, 1e9, -1e9] });
+  assert.deepEqual(huge?.pts, [0, 0, 1, 0], "coordenadas presas entre 0 e 1");
+  assert.equal(cleanStroke({ id: "x", color: "#fff", size: 4, pts: [0, Number.NaN] }), null);
+  assert.equal(cleanStroke({ id: "x", color: "#fff", size: 4, pts: [0, "1"] }), null);
+  assert.equal(cleanStroke({ id: "x", color: "#fff", size: 4, pts: [0, 0, 1] }), null, "número ímpar de coordenadas");
+  assert.equal(cleanStroke({ id: "x", color: "#fff", size: 4, pts: new Array(LIMITS.points * 2 + 2).fill(0.5) }), null, "pontos demais");
+  assert.equal(cleanStroke({ id: "x", color: "url(javascript:1)", size: 1e9, pts: [0.5, 0.5] })?.size, 40);
+  assert.equal(cleanStroke({ id: "x", color: "url(javascript:1)", size: 4, pts: [0.5, 0.5] })?.color, "#ffffff");
+  assert.equal(cleanStroke(null), null);
+  const b = board();
+  assert.equal(applyBoardMsg(b, { type: "stroke", stroke: { id: "z", color: "#fff", size: 4, pts: [Number.POSITIVE_INFINITY, 0] } }, "ana", false), b);
+});
+
+test("a borracha num traço malicioso termina rápido (antes: ~333 bilhões de passos)", () => {
+  // traço que chegou de uma versão sem a conferência, com coordenadas enormes
+  const evil: Stroke = { id: "evil", color: "#fff", size: 4, pts: [0, 0, 1e9, 1e9, -1e9, 1e9], by: "ana" };
+  const t = performance.now();
+  const after = rubOut([evil], [0, 0, 0, 0], 0.05, "ana", false);
+  assert.ok(performance.now() - t < 200, "precisa terminar em menos de 200 ms");
+  assert.deepEqual(after, [evil], "longo demais para cortar: fica inteiro (não some pela metade)");
+});
+
+test("borracha com caminho extremo, num quadro cheio, respeita o orçamento", () => {
+  const full: Stroke[] = [];
+  for (let i = 0; i < LIMITS.strokes; i++) {
+    const pts: number[] = [];
+    for (let k = 0; k < 200; k++) pts.push(k / 200, (i % 100) / 100);
+    full.push({ id: `s${i}`, color: "#fff", size: 40, pts, by: "ana" });
+  }
+  const t = performance.now();
+  const after = rubOut(full, [-1e12, -1e12, 1e12, 1e12], 1e9, "lider", true);
+  assert.ok(performance.now() - t < 1000, "precisa terminar em menos de 1 s");
+  assert.ok(after.length > 0, "o raio é limitado: não vira um Limpar tudo");
+});
+
+test("o quadro não cresce sem fim", () => {
+  let b: Stroke[] = [];
+  for (let i = 0; i < LIMITS.strokes + 50; i++) b = applyBoardMsg(b, { type: "stroke", stroke: { id: `t${i}`, color: "#fff", size: 4, pts: [0.5, 0.5] } }, "ana", false);
+  assert.equal(b.length, LIMITS.strokes);
 });
 

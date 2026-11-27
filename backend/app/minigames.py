@@ -729,6 +729,9 @@ def pick_photo(data: dict[str, Any], want_year: bool, used: set[str]) -> dict[st
         coords = (p.get("coordinates") or [{}])[0]
         meta = info.get("extmetadata") or {}
         url = str(info.get("thumburl") or "").split("?", 1)[0]  # sem os utm_* que o Commons pendura
+        # a mesma miniatura sai por upload.wikimedia.org: o servidor não precisa liberar mais um endereço
+        if url.startswith("https://thumb.wikimedia.org/"):
+            url = "https://upload.wikimedia.org/" + url[len("https://thumb.wikimedia.org/") :]
         if title in used or _SKIP.search(title) or info.get("mime") != "image/jpeg":
             continue
         if not url.startswith(UPLOADS) or int(info.get("width") or 0) < 900:
@@ -822,6 +825,12 @@ class Mundo(Game):
 
     async def prepare(self) -> None:
         used: set[str] = set()
+        # por que cada tentativa falhou: vai para o log se faltar foto (para quem cuida do servidor saber o motivo)
+        why: dict[str, int] = {}
+
+        def fail(reason: str) -> None:
+            why[reason] = why.get(reason, 0) + 1
+
         async with httpx.AsyncClient(timeout=8, headers={"User-Agent": USER_AGENT}, follow_redirects=False) as c:
             for _ in range(self.rounds * 6):
                 if len(self.photos) >= self.rounds:
@@ -837,19 +846,24 @@ class Mundo(Game):
                         },
                     )
                     if r.status_code != 200:
+                        fail(f"busca HTTP {r.status_code}")
                         continue
                     photo = pick_photo(r.json(), self.with_year, used)
                     if not photo:
+                        fail("nenhuma foto boa na busca")
                         continue
                     got = await fetch_photo_bytes(c, photo["url"])
                     if not got:
+                        fail("download recusado")
                         continue
-                except (httpx.HTTPError, ValueError):
+                except (httpx.HTTPError, ValueError) as e:
+                    fail(type(e).__name__)
                     continue
                 used.add(photo["title"])
                 self.photos.append(photo)
                 self.images.append(got)
         if len(self.photos) < 2:
+            log.warning("Onde foi isso?: só %d foto(s); falhas: %s", len(self.photos), why or "nenhuma")
             raise RuntimeError("sem fotos")
         self.rounds = len(self.photos)
 

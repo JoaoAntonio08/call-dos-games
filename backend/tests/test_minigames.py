@@ -216,7 +216,8 @@ def test_photo_from_the_new_commons_thumbnail_host():
     # desde 2026 o Commons entrega as miniaturas por thumb.wikimedia.org, com utm_* no fim
     url = "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/14/Rua.JPG/1280px-Rua.JPG?utm_source=commons.wikimedia.org&utm_content=thumbnail"
     p = mg.pick_photo(_commons(url=url), False, set())
-    assert p and p["url"] == "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/14/Rua.JPG/1280px-Rua.JPG"
+    # baixa pelo upload.wikimedia.org (mesmo arquivo): o servidor não precisa liberar um endereço novo
+    assert p and p["url"] == "https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Rua.JPG/1280px-Rua.JPG"
     assert mg.pick_photo(_commons(url="https://thumb.wikimedia.org.evil.example/x.jpg"), False, set()) is None
 
 

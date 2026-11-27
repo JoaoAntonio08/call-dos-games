@@ -846,14 +846,13 @@ function WorldMap({
       lib.current = leaflet;
       const m = leaflet.map(box.current, { worldCopyJump: true, minZoom: 1 }).setView([15, 0], 1);
       leaflet
-        // mapa da CARTO (dados do OpenStreetMap): os servidores do próprio OpenStreetMap bloqueiam (403) apps
-        // que mandam pedido sem Referer, e o site inteiro usa no-referrer
-        .tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        // mapa da Esri: não pede chave nem Referer. (O OpenStreetMap bloqueava o app com 403 e a CARTO
+        // passou a exigir chave; o site inteiro manda no-referrer)
+        .tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
           maxZoom: 18,
-          subdomains: "abcd",
           referrerPolicy: "strict-origin-when-cross-origin",
           attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noreferrer">CARTO</a>',
+            'Mapa &copy; <a href="https://www.esri.com" target="_blank" rel="noreferrer">Esri</a>, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
         })
         .addTo(m);
       m.on("click", (e: import("leaflet").LeafletMouseEvent) => {

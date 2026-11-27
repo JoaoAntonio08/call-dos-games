@@ -32,6 +32,23 @@ export const TAG_LABEL: Record<Tag, string> = { novo: "Novidades", melhorou: "Me
 
 export const RELEASES: Release[] = [
   {
+    version: "2.5.5",
+    date: "2026-11-27",
+    title: "Mapa no lugar",
+    summary: "O mapa do Onde foi isso? aparece de verdade, as fotos vêm por um caminho mais confiável e o quadro aguenta qualquer coisa que chegue nele.",
+    scene: "jogos",
+    groups: [
+      {
+        tag: "corrigido",
+        items: [
+          { emoji: "🗺️", title: "Mapa do Onde foi isso?", text: "Trocamos o mapa por um que não pede cadastro: chega de quadrados escritos API KEY REQUIRED." },
+          { emoji: "📷", title: "Fotos do jogo", text: "As fotos do Wikimedia passam pelo mesmo endereço de sempre." },
+          { emoji: "🧽", title: "Quadro mais firme", text: "Traço ou borracha estranhos que cheguem de outra pessoa não travam mais o quadro de ninguém." },
+        ],
+      },
+    ],
+  },
+  {
     version: "2.5.4",
     date: "2026-11-26",
     title: "Jogos de volta",
