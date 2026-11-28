@@ -26,6 +26,7 @@ import { NoiteAlert, NoitesView } from "./noites";
 import { RetroView } from "./retro";
 import { GameReporter } from "./jogo-app";
 import { Modals } from "./modals";
+import { ScreenGuard } from "./screen-guard";
 import { WhatsNew } from "./whats-new";
 
 export function Shell() {
@@ -136,6 +137,8 @@ export function Shell() {
   if (server && page === "retro") main = <RetroView server={server} />;
 
   const members = server && channel?.type === "text" && showMembers;
+  // cada tela tem sua rede de proteção: se uma quebrar, a call (que mora acima) não cai junto
+  const screenKey = route.kind === "server" ? `s:${route.serverId}:${route.channelId ?? route.page ?? ""}` : route.kind === "dm" ? `d:${route.id}` : route.kind;
   // modo foco só vale na tela da call
   const focus = focusOn && channel?.type === "voice";
 
@@ -147,9 +150,15 @@ export function Shell() {
       >
         <ServerRail />
         <div className="flex w-[248px] flex-col bg-cocoa-2">
-          {server ? <ServerSidebar server={server} activeId={channel?.id ?? null} page={page} /> : <HomeSidebar activeDm={dm?.id ?? null} />}
-          <VoiceBar />
-          <UserBar />
+          <ScreenGuard resetKey={screenKey}>
+            {server ? <ServerSidebar server={server} activeId={channel?.id ?? null} page={page} /> : <HomeSidebar activeDm={dm?.id ?? null} />}
+          </ScreenGuard>
+          <ScreenGuard compact>
+            <VoiceBar />
+          </ScreenGuard>
+          <ScreenGuard compact>
+            <UserBar />
+          </ScreenGuard>
         </div>
       </div>
       {navOpen && <div className="fixed inset-0 z-30 bg-cocoa-0/60 md:hidden" onClick={() => useUI.setState({ navOpen: false })} />}
@@ -160,21 +169,33 @@ export function Shell() {
           <div className="bg-honey/90 px-4 py-1.5 text-center text-[12.5px] font-semibold text-cocoa-0">Reconectando ao servidor da turma…</div>
         )}
         <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">{main}</div>
-          {members && <MemberList server={server!} />}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ScreenGuard resetKey={screenKey}>{main}</ScreenGuard>
+          </div>
+          {members && (
+            <ScreenGuard resetKey={screenKey} compact>
+              <MemberList server={server!} />
+            </ScreenGuard>
+          )}
         </div>
       </main>
 
-      <ProfilePopover />
-      <UserMenu />
-      <HypeAlert />
-      <NoiteAlert />
-      <PersistentPlayer />
-      <MessageAlerts />
-      <ContextMenuHost />
-      <GameReporter />
-      <Modals />
-      <WhatsNew />
+      <ScreenGuard resetKey={screenKey} compact>
+        <ProfilePopover />
+        <UserMenu />
+        <HypeAlert />
+        <NoiteAlert />
+      </ScreenGuard>
+      <ScreenGuard compact>
+        <PersistentPlayer />
+      </ScreenGuard>
+      <ScreenGuard resetKey={screenKey} compact>
+        <MessageAlerts />
+        <ContextMenuHost />
+        <GameReporter />
+        <Modals />
+        <WhatsNew />
+      </ScreenGuard>
       {toastMsg && (
         <div key={toastMsg.id} role="status" className="slide-in glass-float toast-glass fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[12px] bg-oat px-4 py-2.5 text-[13.5px] font-semibold text-cocoa-0">
           {toastMsg.text}
