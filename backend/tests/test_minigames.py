@@ -418,3 +418,62 @@ def test_changing_channel_permissions_forgets_the_cache(monkeypatch):
     assert set(cq._server_of_channel) == {10, 11}
     cq.forget_channels(server_id=77)
     assert set(cq._server_of_channel) == {11}
+
+
+# ------------------------------------------------------------------ escolha das músicas
+def test_same_song_from_different_uploads_counts_once():
+    songs = [
+        ("aaaaaaaaaaa", "Eagles - Hotel California (Official Audio)", "Eagles"),
+        ("bbbbbbbbbbb", "Hotel California - Eagles (Live 1977)", "EaglesVEVO"),
+        ("ccccccccccc", "Creedence Clearwater Revival - Have You Ever Seen The Rain", "CCR"),
+    ]
+    got = mg.pick_songs(songs, 3, [])
+    assert len(got) == 2
+    assert {mg.song_id(t, a) for _, t, a in got} == {"eagles|hotel california", "creedence clearwater revival|have you ever seen the rain"}
+
+
+def test_recent_songs_wait_their_turn():
+    songs = [(f"vid{i:08d}", f"Banda {i} - Musica numero {i}", f"Banda {i}") for i in range(12)]
+    recent = [mg.song_id(t, a) for _, t, a in songs[:6]]
+    got = mg.pick_songs(songs, 6, recent)
+    assert {mg.song_id(t, a) for _, t, a in got}.isdisjoint(recent), "tocou há pouco: fica de fora"
+    # sem música nova suficiente, completa com as recentes mais antigas primeiro
+    got = mg.pick_songs(songs, 8, recent)
+    assert [mg.song_id(t, a) for _, t, a in got][6:] == recent[:2]
+
+
+@pytest.mark.asyncio
+async def test_played_here_mode_does_not_fill_with_searched_hits(call, monkeypatch):
+    called = []
+
+    async def fake_style(style, picks=3):
+        called.append(style)
+        return [(f"vid{i:08d}", f"Sertanejo {i} - Modao {i}", "x") for i in range(20)]
+
+    monkeypatch.setattr(mg, "_style_songs", fake_style)
+    g = mg.Musica(9, 1, [1, 2], None)
+    g.setup({"style": "historico", "rounds": 8})
+    with pytest.raises(HTTPException):
+        await g.prepare()  # sem servidor e sem histórico: não inventa músicas de busca
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_style_game_does_not_repeat_the_last_games(call, monkeypatch):
+    pool_ = [(f"vid{i:08d}", f"Banda {i} - Rock numero {i}", f"Banda {i}") for i in range(30)]
+
+    async def fake_style(style, picks=3):
+        return pool_
+
+    from app.core import settings
+
+    monkeypatch.setattr(settings, "youtube_key", "x", raising=False)
+    monkeypatch.setattr(mg, "_style_songs", fake_style)
+    monkeypatch.setattr(mg, "_recent_songs", {})
+    seen: list[set[str]] = []
+    for _ in range(3):
+        g = mg.Musica(9, 1, [1, 2], 77)
+        g.setup({"style": "rock", "rounds": 8})
+        await g.prepare()
+        seen.append({mg.song_id(t, a) for _, t, a in g.songs})
+    assert seen[0].isdisjoint(seen[1]) and seen[1].isdisjoint(seen[2]) and seen[0].isdisjoint(seen[2])
