@@ -7,6 +7,7 @@ import { bootstrap, useStore } from "@/lib/store";
 import { ApiPending } from "@/components/api-pending";
 import { VoiceProvider } from "@/lib/voice";
 import { Shell } from "./shell";
+import { ScreenGuard } from "./screen-guard";
 import { Intro } from "./intro";
 
 const LAMP_LINES = ["Acendendo o abajur…", "Ajeitando as almofadas…", "Esquentando a pipoca…", "Chamando a turma…"];
@@ -52,7 +53,10 @@ export function AppRoot() {
 
   return withIntro(
     <VoiceProvider>
-      <Shell />
+      {/* última rede: um erro na casca não derruba a call */}
+      <ScreenGuard resetKey={path}>
+        <Shell />
+      </ScreenGuard>
     </VoiceProvider>,
   );
 }
