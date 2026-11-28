@@ -546,6 +546,81 @@ STYLES = {
     "funk": "funk brasileiro",
     "sertanejo": "sertanejo sucessos",
 }
+# cada estilo tem várias buscas (décadas, subgêneros): a partida sorteia algumas, e a mesma busca fixa
+# não devolve sempre os mesmos 40 vídeos (era por isso que o rock tocava Hotel California toda vez)
+STYLE_QUERIES: dict[str, list[str]] = {
+    "sucessos": [
+        "sucessos músicas brasileiras", "mpb clássicos", "pop brasileiro anos 2000", "pagode anos 90 sucessos",
+        "axé anos 90", "pop nacional anos 2010", "samba clássicos", "sucessos brasileiros anos 80", "pop brasileiro 2020",
+    ],
+    "anime": [
+        "anime opening", "anime opening 2000s", "anime ending song", "shounen anime opening", "anime opening 2010s",
+        "classic anime opening 90s", "anime opening 2020s", "studio ghibli song",
+    ],
+    "games": [
+        "video game soundtrack", "nintendo game music", "rpg game soundtrack", "retro game music 16 bit",
+        "playstation game theme song", "indie game soundtrack", "fighting game theme", "final fantasy music",
+    ],
+    "rock": [
+        "rock clássico", "rock anos 60 hits", "rock anos 70 hits", "rock anos 80 hits", "rock anos 90 hits",
+        "hard rock classics", "rock nacional anos 80", "rock brasileiro anos 90", "grunge 90s songs", "punk rock classics",
+        "rock alternativo anos 2000", "heavy metal classics", "soft rock classics", "britpop hits", "indie rock 2000s",
+    ],
+    "funk": [
+        "funk brasileiro", "funk anos 2000 sucessos", "funk melody", "funk carioca clássicos", "funk 2020 sucessos",
+        "funk paulista sucessos", "brega funk sucessos",
+    ],
+    "sertanejo": [
+        "sertanejo sucessos", "sertanejo universitário sucessos", "sertanejo raiz clássicos", "modão sertanejo",
+        "sertanejo anos 90", "sertanejo 2010 sucessos", "feminejo sucessos", "sertanejo 2020 sucessos",
+    ],
+}
+SEARCH_CACHE_SECONDS = 24 * 3600  # cada busca custa cota do YouTube: guarda o resultado por um dia
+_search_cache: dict[str, tuple[float, list[tuple[str, str, str]]]] = {}
+# músicas que tocaram nas últimas partidas de cada servidor (pelo nome, não pelo vídeo: a mesma música
+# tem vários uploads). Elas ficam de fora até passarem RECENT_SONGS outras.
+RECENT_SONGS = 40
+_recent_songs: dict[int, list[str]] = {}
+
+
+def song_id(title: str, author: str) -> str:
+    """A mesma música em uploads diferentes ("Eagles - Hotel California" e "Hotel California - Eagles (Live)")
+    vira a mesma chave: as partes do título, sem o lixo, em ordem alfabética."""
+    t = re.split(r"\b(?:feat|ft)\.?\s", _JUNK.sub(" ", html.unescape(title or "")), flags=re.I)[0]
+    parts = sorted({norm(p) for p in re.split(r"\s+[-–—|:]\s+|\s+[-–—]\s*|\s*[\"“”]\s*", t) if len(norm(p)) >= 2})
+    return "|".join(parts) or norm(title)
+
+
+async def _style_songs(style: str, picks: int = 3) -> list[tuple[str, str, str]]:
+    """Algumas buscas sorteadas do estilo, com cache: um conjunto bem maior e variado de músicas."""
+    from .routes import radio  # noqa: PLC0415
+
+    queries = random.sample(STYLE_QUERIES.get(style) or [STYLES.get(style) or STYLES["sucessos"]], k=min(picks, len(STYLE_QUERIES.get(style) or [1])))
+    now = time.monotonic()
+    out: list[tuple[str, str, str]] = []
+    for q in queries:
+        hit = _search_cache.get(q)
+        if not hit or now - hit[0] > SEARCH_CACHE_SECONDS:
+            got = await radio._search(q, n=40)
+            if got:  # erro de cota não fica guardado
+                _search_cache[q] = hit = (now, got)
+        out += hit[1] if hit else []
+    for q in [q for q, (t, _) in _search_cache.items() if now - t > SEARCH_CACHE_SECONDS]:
+        _search_cache.pop(q, None)
+    return out
+
+
+def pick_songs(candidates: list[tuple[str, str, str]], n: int, recent: list[str]) -> list[tuple[str, str, str]]:
+    """Sorteia n músicas sem repetir nome na partida, deixando de fora as que tocaram há pouco.
+    Se não der, completa com as recentes mais antigas primeiro."""
+    by_name: dict[str, tuple[str, str, str]] = {}
+    for song in candidates:
+        if song_keys(song[1], song[2]):
+            by_name.setdefault(song_id(song[1], song[2]), song)
+    fresh = [name for name in by_name if name not in recent]
+    random.shuffle(fresh)
+    order = fresh + [name for name in recent if name in by_name]  # recent vai do mais antigo ao mais novo
+    return [by_name[name] for name in order[:n]]
 _JUNK = re.compile(
     r"\((?:[^)]*)\)|\[(?:[^\]]*)\]|\b(?:official|oficial|music|video|clipe|lyrics?|letra|audio|ao vivo|live|hd|4k|remaster(?:ed)?|visualizer)\b",
     re.I,
@@ -599,27 +674,31 @@ class Musica(Game):
             rows = await pool().fetch(
                 """SELECT DISTINCT ON (m.video_id) m.video_id, m.title, m.author FROM music_log m
                    JOIN channels c ON c.id = m.channel_id
-                   WHERE m.server_id = $1 AND m.played_at > now() - interval '365 days' AND m.title <> ''
+                   WHERE m.server_id = $1 AND m.played_at > now() - interval '365 days' AND m.title <> '' AND NOT m.from_radio
                      AND (m.channel_id = $2 OR cardinality(c.view_roles) = 0)
                    ORDER BY m.video_id, m.played_at DESC LIMIT 400""",
                 self.server_id,
                 self.cid,
             )
             pool_ = {r["video_id"]: (r["video_id"], r["title"], r["author"]) for r in rows}
-        query = STYLES[self.style] or STYLES["sucessos"]
-        if len(pool_) < self.rounds:
+        elif self.style != "historico":
             from .core import settings  # noqa: PLC0415
-            from .routes import radio  # noqa: PLC0415
 
             if settings.youtube_key:
-                for v in await radio._search(query, n=40):
+                for v in await _style_songs(self.style):
                     pool_.setdefault(v[0], v)
-        songs = [s for s in pool_.values() if song_keys(s[1], s[2])]
+        # "já tocadas aqui" usa SÓ o que vocês puseram para tocar: não completa com busca de sucessos
+        key = self.server_id or -self.cid
+        recent = _recent_songs.setdefault(key, [])
+        songs = pick_songs(list(pool_.values()), self.rounds, recent)
         if len(songs) < 4:
-            raise err(400, "Precisa de pelo menos 4 músicas: toquem umas na call antes (ou escolham um estilo).")
-        random.shuffle(songs)
-        self.songs = songs[: self.rounds]
+            if self.style == "historico":
+                raise err(400, "Precisa de pelo menos 4 músicas diferentes tocadas na call (ou escolham um estilo).")
+            raise err(400, "Não achei músicas desse estilo agora. Tentem outro estilo daqui a pouco.")
+        self.songs = songs
         self.rounds = len(self.songs)
+        names = [song_id(t, a) for _, t, a in songs]
+        recent[:] = ([r for r in recent if r not in names] + names)[-RECENT_SONGS:]
 
     async def next_round(self) -> None:
         self.cancel_timer()
